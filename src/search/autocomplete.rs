@@ -66,7 +66,7 @@ impl AutocompleteData {
         if let Ok(country_list) = api_client.get_countries().await {
             data.countries = country_list
                 .into_iter()
-                .map(|c| c.name.to_lowercase())
+                .map(|c| c.name)
                 .collect();
         }
 
@@ -74,7 +74,7 @@ impl AutocompleteData {
         if let Ok(language_list) = api_client.get_languages().await {
             data.languages = language_list
                 .into_iter()
-                .map(|l| l.name.to_lowercase())
+                .map(|l| l.name)
                 .collect();
         }
 
@@ -82,7 +82,7 @@ impl AutocompleteData {
         if let Ok(tag_list) = api_client.get_tags(1000).await {
             data.tags = tag_list
                 .into_iter()
-                .map(|t| t.name.to_lowercase())
+                .map(|t| t.name)
                 .collect();
         }
 
