@@ -623,6 +623,23 @@ impl App {
         Ok(())
     }
 
+    pub fn play_restored(&mut self) -> Result<()> {
+        // Play the restored station from player_info (used when restarting with last station)
+        if !self.player_info.station_url.is_empty() {
+            tracing::info!("Playing restored station: {}", self.player_info.station_name);
+            self.player_cmd_tx.send(PlayerCommand::Play(
+                self.player_info.station_name.clone(),
+                self.player_info.station_url.clone(),
+            ))?;
+            self.add_log(format!("Playing: {}", self.player_info.station_name));
+            self.status_message = Some(format!("Playing: {}", self.player_info.station_name));
+        } else {
+            tracing::warn!("No restored station to play");
+            self.status_message = Some("No station to play".to_string());
+        }
+        Ok(())
+    }
+
     pub fn stop(&mut self) -> Result<()> {
         self.player_cmd_tx.send(PlayerCommand::Stop)?;
         Ok(())

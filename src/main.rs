@@ -420,7 +420,13 @@ async fn handle_key_event(app: &mut App, key: KeyCode, modifiers: KeyModifiers) 
         KeyCode::Char(' ') => {
             if app.player_info.state == player::PlayerState::Playing {
                 let _ = app.pause();
+            } else if app.player_info.state == player::PlayerState::Paused {
+                let _ = app.resume();
+            } else if app.player_info.state == player::PlayerState::Stopped && !app.player_info.station_url.is_empty() {
+                // If stopped but there's a restored station, play it
+                let _ = app.play_restored();
             } else {
+                // Otherwise try to resume (handles other edge cases)
                 let _ = app.resume();
             }
         }
