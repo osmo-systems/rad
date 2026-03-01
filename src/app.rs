@@ -293,8 +293,11 @@ impl App {
             return Ok(());
         }
         
+        tracing::info!("load_page: Loading page {}, current_page={}, is_last_page={}", page, self.current_page, self.is_last_page);
+        
         // Check cache first
         if let Some(stations) = self.pages_cache.get(&page) {
+            tracing::info!("load_page: Found page {} in cache with {} stations", page, stations.len());
             self.stations = stations.clone();
             self.current_page = page;
             self.selected_index = 0;
@@ -305,6 +308,12 @@ impl App {
             let query = &self.current_query;
             self.is_last_page = stations.len() < query.limit;
             
+            let msg = format!("Loaded page {} from cache ({} stations)", page, stations.len());
+            self.status_message = Some(msg.clone());
+            self.add_log(msg);
+            
+            tracing::info!("load_page: Cache loaded, is_last_page now={}", self.is_last_page);
+            
             return Ok(());
         }
         
@@ -312,9 +321,12 @@ impl App {
         let mut query = self.current_query.clone();
         query.offset = (page - 1) * query.limit;
         
+        tracing::info!("load_page: Page {} not in cache, fetching from API with offset={}", page, query.offset);
+        
         self.loading = true;
         match self.api_client.advanced_search(&query).await {
             Ok(stations) => {
+                tracing::info!("load_page: API returned {} stations for page {}", stations.len(), page);
                 self.is_last_page = stations.len() < query.limit;
                 
                 // Cache the page (with LRU eviction if needed)
@@ -339,6 +351,12 @@ impl App {
                 self.scroll_offset = 0;
                 self.loading = false;
                 
+                let msg = format!("Loaded page {} ({} stations)", page, self.stations.len());
+                self.status_message = Some(msg.clone());
+                self.add_log(msg);
+                
+                tracing::info!("load_page: Success, is_last_page={}", self.is_last_page);
+                
                 Ok(())
             }
             Err(e) => {
@@ -350,9 +368,11 @@ impl App {
     }
 
     pub async fn next_page(&mut self) -> Result<()> {
+        tracing::info!("next_page: called, is_last_page={}, current_page={}", self.is_last_page, self.current_page);
         if !self.is_last_page {
             self.load_page(self.current_page + 1).await
         } else {
+            tracing::info!("next_page: blocked because is_last_page=true");
             Ok(())
         }
     }

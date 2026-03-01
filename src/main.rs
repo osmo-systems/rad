@@ -450,12 +450,15 @@ async fn handle_key_event(app: &mut App, key: KeyCode, modifiers: KeyModifiers) 
         }
         KeyCode::Char(']') => {
             // Load next page from API
+            tracing::info!("'] key pressed: current_page={}, is_last_page={}", app.current_page, app.is_last_page);
             if !app.is_last_page {
+                tracing::info!("Calling next_page()");
                 if let Err(e) = app.next_page().await {
                     tracing::error!("Failed to load next page: {}", e);
                     app.show_error(format!("Failed to load page: {}", e));
                 }
             } else {
+                tracing::info!("Showing 'already on last page' warning");
                 app.show_warning("Already on last page".to_string());
             }
         }
