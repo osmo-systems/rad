@@ -199,22 +199,26 @@ impl App {
     }
 
     pub async fn execute_search(&mut self) -> Result<()> {
-        tracing::info!("Executing search with query: {:?}", self.current_query);
+        tracing::info!("execute_search: Starting with query: {:?}", self.current_query);
         
         // Use the already-set current_query
         let mut query = self.current_query.clone();
         query.reset_pagination();
+        
+        tracing::info!("execute_search: Pagination reset");
         
         // Clear cache and reset pagination
         self.pages_cache.clear();
         self.current_page = 1;
         self.is_last_page = false;
         
+        tracing::info!("execute_search: Cache cleared, calling API");
+        
         // Load first page
         self.loading = true;
         match self.api_client.advanced_search(&query).await {
             Ok(stations) => {
-                tracing::info!("Search returned {} stations", stations.len());
+                tracing::info!("execute_search: API returned {} stations", stations.len());
                 self.is_last_page = stations.len() < query.limit;
                 
                 // Cache the page
@@ -225,6 +229,8 @@ impl App {
                 self.selected_index = 0;
                 self.scroll_offset = 0;
                 self.loading = false;
+                
+                tracing::info!("execute_search: Stations loaded, updating UI");
                 
                 // Add to search history if not default query
                 if !is_default_query(&query) {
@@ -238,15 +244,18 @@ impl App {
                 self.status_message = Some(msg.clone());
                 self.add_log(msg);
                 
+                tracing::info!("execute_search: Log added");
+                
                 // Close popup if it was open
                 if self.search_popup.is_some() {
                     self.close_search_popup();
                 }
                 
+                tracing::info!("execute_search: Completed successfully");
                 Ok(())
             }
             Err(e) => {
-                tracing::error!("Search failed: {}", e);
+                tracing::error!("execute_search: API call failed: {}", e);
                 self.loading = false;
                 // Network error - show error popup
                 self.show_error(format!("Search failed: {}", e));

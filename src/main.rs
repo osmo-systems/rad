@@ -301,13 +301,18 @@ async fn handle_key_event(app: &mut App, key: KeyCode, modifiers: KeyModifiers) 
                 if let Some(popup) = &mut app.search_popup {
                     // Always execute search when Enter is pressed
                     let query_str = popup.get_query();
+                    tracing::info!("Enter pressed in popup, query: '{}'", query_str);
                     match parse_query(query_str) {
                         Ok(query) => {
+                            tracing::info!("Query parsed successfully: {:?}", query);
                             app.current_query = query;
                             app.close_search_popup();
+                            tracing::info!("Popup closed, calling execute_search");
                             if let Err(e) = app.execute_search().await {
                                 tracing::error!("Search failed: {}", e);
                                 app.show_error(format!("Search failed: {}", e));
+                            } else {
+                                tracing::info!("execute_search completed successfully");
                             }
                         }
                         Err(e) => {
