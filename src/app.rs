@@ -63,6 +63,7 @@ pub struct App {
     // Loading state
     pub loading: bool,
     pub status_message: Option<String>,
+    pub pending_search: bool, // Flag to trigger search on next loop iteration
     
     // Error popup
     pub error_popup: Option<String>,
@@ -145,6 +146,7 @@ impl App {
             data_dir,
             
             loading: false,
+            pending_search: false,
             status_message: None,
             
             error_popup: None,
