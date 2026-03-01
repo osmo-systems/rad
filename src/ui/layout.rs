@@ -43,7 +43,7 @@ fn draw_main_content(f: &mut Frame, app: &mut App, area: Rect) {
     // Build tab titles
     let tab_title = Line::from(vec![
         Span::styled(
-            "Browse(1)",
+            "Browse",
             if matches!(app.current_tab, Tab::Browse) {
                 Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
             } else {
@@ -52,7 +52,7 @@ fn draw_main_content(f: &mut Frame, app: &mut App, area: Rect) {
         ),
         Span::raw("  "),
         Span::styled(
-            "Favorites(2)",
+            "Favorites",
             if matches!(app.current_tab, Tab::Favorites) {
                 Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
             } else {
@@ -61,7 +61,7 @@ fn draw_main_content(f: &mut Frame, app: &mut App, area: Rect) {
         ),
         Span::raw("  "),
         Span::styled(
-            "History(3)",
+            "History",
             if matches!(app.current_tab, Tab::History) {
                 Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
             } else {
@@ -74,7 +74,12 @@ fn draw_main_content(f: &mut Frame, app: &mut App, area: Rect) {
     draw_station_list(f, app, area, tab_title);
 }
 
-fn draw_station_list(f: &mut Frame, app: &App, area: Rect, title: Line) {
+fn draw_station_list(f: &mut Frame, app: &mut App, area: Rect, title: Line) {
+    // Calculate visible stations count (area height minus borders and padding)
+    // Each station takes 1 line, borders take 2 lines
+    let visible_count = (area.height.saturating_sub(2)) as usize;
+    app.visible_stations_count = visible_count.max(1);
+    
     if app.stations.is_empty() {
         let text = if app.loading {
             "Loading stations..."

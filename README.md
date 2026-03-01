@@ -25,7 +25,7 @@ A lightning-fast terminal-based web radio player with advanced search capabiliti
 
 ```
 ┌Tabs────────────────────────────────────────────────────────────────┐
-│ Browse (1)  Favorites (2)  History (3)                             │
+│ Browse  Favorites  History                                         │
 └────────────────────────────────────────────────────────────────────┘
 ┌Stations (100 stations)─────────────────────────────────────────────┐
 │ ♥ ● Jazz FM - USA - MP3 - 128 kbps                                 │
@@ -39,7 +39,7 @@ A lightning-fast terminal-based web radio player with advanced search capabiliti
 │ Controls: Enter=Play Space=Pause/Resume S=Stop R=Reload            │
 └────────────────────────────────────────────────────────────────────┘
 ┌Status──────────────────────────────────────────────────────────────┐
-│ Keys: ↑/↓=Navigate Tab=Switch /=Search F=Favorite V=Vote Ctrl+C=Quit │
+│ Keys: ↑/↓=Navigate []=Pages /=Search F=Favorite V=Vote Ctrl+C=Quit │
 └────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -133,6 +133,7 @@ You can search using simple text (e.g., `jazz`) or field-based queries (e.g., `n
 | `reverse` | Reverse sort order | `reverse=true` |
 | `hidebroken` | Hide offline stations | `hidebroken=true` |
 | `is_https` | Only HTTPS streams | `is_https=true` |
+| `page` | Jump to specific page number | `page=5` |
 
 #### Example Queries
 
@@ -182,11 +183,15 @@ This shows the most popular, working stations first.
 
 #### Navigation
 - `↑/↓`: Navigate through station lists one at a time
-- `PgUp/PgDn`: Load previous/next page of search results (fetches from API if more pages available), or jump scroll within current page
+- `PgUp/PgDn`: Scroll up/down within current list by one page (visible area height)
 - `Home/End`: Jump to first/last station in current list
 - `Tab`: Next tab
-- `Shift+Tab`: Previous tab
-- `1/2/3`: Quick switch to Browse/Favorites/History tabs
+- `Ctrl+Tab` or `Shift+Tab`: Previous tab
+
+#### Pagination (API Requests)
+- `[`: Load previous page from API
+- `]`: Load next page from API
+- Or use `page=N` in search query to jump to specific page
 
 #### Search
 - `/`: Open search popup

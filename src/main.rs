@@ -363,36 +363,22 @@ async fn handle_key_event(app: &mut App, key: KeyCode, modifiers: KeyModifiers) 
         KeyCode::Up => app.select_prev(),
         KeyCode::Down => app.select_next(),
         KeyCode::PageUp => {
-            // If we're viewing search results with pagination, go to previous page
-            if app.current_page > 1 {
-                if let Err(e) = app.prev_page().await {
-                    tracing::error!("Failed to load previous page: {}", e);
-                    app.show_error(format!("Failed to load page: {}", e));
-                }
-            } else {
-                // Otherwise, page up within the current list
-                app.page_up();
-            }
+            // Scroll up within the current list by one page length
+            app.page_up();
         }
         KeyCode::PageDown => {
-            // If we're viewing search results with pagination, go to next page
-            if !app.is_last_page {
-                if let Err(e) = app.next_page().await {
-                    tracing::error!("Failed to load next page: {}", e);
-                    app.show_error(format!("Failed to load page: {}", e));
-                }
-            } else {
-                // Otherwise, page down within the current list
-                app.page_down();
-            }
+            // Scroll down within the current list by one page length
+            app.page_down();
         }
         KeyCode::Home => {
-            // Go to first page of search results
-            if app.current_page > 1 {
-                if let Err(e) = app.first_page().await {
-                    tracing::error!("Failed to load first page: {}", e);
-                    app.show_error(format!("Failed to load page: {}", e));
-                }
+            // Jump to first station in current list
+            app.selected_index = 0;
+            app.scroll_offset = 0;
+        }
+        KeyCode::End => {
+            // Jump to last station in current list
+            if !app.stations.is_empty() {
+                app.selected_index = app.stations.len() - 1;
             }
         }
         KeyCode::Enter => {
@@ -439,29 +425,39 @@ async fn handle_key_event(app: &mut App, key: KeyCode, modifiers: KeyModifiers) 
             }
         }
         KeyCode::Tab => {
-            if modifiers.contains(KeyModifiers::SHIFT) {
+            if modifiers.contains(KeyModifiers::CONTROL) {
+                // Ctrl+Tab: Previous tab
                 app.prev_tab();
             } else {
+                // Tab: Next tab
                 app.next_tab();
             }
         }
-        KeyCode::Char('[') => {
+        KeyCode::BackTab => {
+            // Shift+Tab also goes to previous tab (for compatibility)
             app.prev_tab();
         }
+        KeyCode::Char('[') => {
+            // Load previous page from API
+            if app.current_page > 1 {
+                if let Err(e) = app.prev_page().await {
+                    tracing::error!("Failed to load previous page: {}", e);
+                    app.show_error(format!("Failed to load page: {}", e));
+                }
+            } else {
+                app.show_error("Already on first page".to_string());
+            }
+        }
         KeyCode::Char(']') => {
-            app.next_tab();
-        }
-        KeyCode::Char('1') => {
-            app.current_tab = app::Tab::Browse;
-            app.reload_current_tab();
-        }
-        KeyCode::Char('2') => {
-            app.current_tab = app::Tab::Favorites;
-            app.reload_current_tab();
-        }
-        KeyCode::Char('3') => {
-            app.current_tab = app::Tab::History;
-            app.reload_current_tab();
+            // Load next page from API
+            if !app.is_last_page {
+                if let Err(e) = app.next_page().await {
+                    tracing::error!("Failed to load next page: {}", e);
+                    app.show_error(format!("Failed to load page: {}", e));
+                }
+            } else {
+                app.show_error("Already on last page".to_string());
+            }
         }
         _ => {}
     }

@@ -40,6 +40,7 @@ impl Default for AutocompleteData {
                 "reverse".to_string(),
                 "hidebroken".to_string(),
                 "is_https".to_string(),
+                "page".to_string(),
             ],
             order_values: vec![
                 "name".to_string(),

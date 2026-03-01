@@ -84,6 +84,9 @@ pub struct App {
     // Status log
     pub status_log: Vec<String>,
     pub status_log_scroll: usize,
+    
+    // UI state
+    pub visible_stations_count: usize,
 }
 
 impl App {
@@ -162,6 +165,8 @@ impl App {
             
             status_log: Vec::new(),
             status_log_scroll: 0,
+            
+            visible_stations_count: 10, // Default, will be updated by UI
         };
         
         Ok(app)
@@ -440,6 +445,8 @@ impl App {
     }
 
     pub fn page_down(&mut self) {
+        let jump_size = self.visible_stations_count.max(1);
+        
         if self.browse_list_mode {
             let max = match self.browse_mode {
                 BrowseMode::ByCountry => self.countries.len(),
@@ -448,18 +455,20 @@ impl App {
                 _ => 0,
             };
             if max > 0 {
-                self.browse_list_index = (self.browse_list_index + 10).min(max - 1);
+                self.browse_list_index = (self.browse_list_index + jump_size).min(max - 1);
             }
         } else if !self.stations.is_empty() {
-            self.selected_index = (self.selected_index + 10).min(self.stations.len() - 1);
+            self.selected_index = (self.selected_index + jump_size).min(self.stations.len() - 1);
         }
     }
 
     pub fn page_up(&mut self) {
+        let jump_size = self.visible_stations_count.max(1);
+        
         if self.browse_list_mode {
-            self.browse_list_index = self.browse_list_index.saturating_sub(10);
+            self.browse_list_index = self.browse_list_index.saturating_sub(jump_size);
         } else {
-            self.selected_index = self.selected_index.saturating_sub(10);
+            self.selected_index = self.selected_index.saturating_sub(jump_size);
         }
     }
 

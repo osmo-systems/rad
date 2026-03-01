@@ -104,6 +104,7 @@ const VALID_FIELDS: &[&str] = &[
     "reverse",
     "hidebroken",
     "is_https",
+    "page",
 ];
 
 /// Valid order field values
@@ -322,6 +323,19 @@ pub fn parse_query(input: &str) -> Result<SearchQuery, ParseError> {
                         field: "is_https".to_string(),
                         value: value.to_string(),
                         reason: "must be 'true' or 'false'".to_string(),
+                    }),
+                }
+            }
+            "page" => {
+                match value.parse::<usize>() {
+                    Ok(page_num) if page_num > 0 => {
+                        // Convert page number (1-indexed) to offset
+                        query.offset = (page_num - 1) * query.limit;
+                    }
+                    _ => return Err(ParseError::InvalidValue {
+                        field: "page".to_string(),
+                        value: value.to_string(),
+                        reason: "must be a positive integer".to_string(),
                     }),
                 }
             }

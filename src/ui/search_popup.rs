@@ -185,6 +185,7 @@ impl SearchPopup {
             "reverse" => "🔄 ",
             "hidebroken" => "🔧 ",
             "is_https" => "🔒 ",
+            "page" => "📄 ",
             _ => "🔍 ",
         }
     }
@@ -194,8 +195,8 @@ impl SearchPopup {
         let popup_width = 52;
         let base_height = 7; // Title + input + borders + footer
         
-        // Show all autocomplete items (up to 13 for field names)
-        let max_autocomplete_items = 13;
+        // Show all autocomplete items (up to 14 for field names)
+        let max_autocomplete_items = 14;
         let autocomplete_height = if self.autocomplete_shown {
             (self.autocomplete_items.len().min(max_autocomplete_items) + 2) as u16 // +2 for borders
         } else {
@@ -287,7 +288,7 @@ impl SearchPopup {
     }
 
     fn render_autocomplete(&self, f: &mut Frame, area: Rect) {
-        let visible_items = 13; // Show all items up to 13
+        let visible_items = 14; // Show all items up to 14
         let items: Vec<ListItem> = self.autocomplete_items
             .iter()
             .skip(self.autocomplete_scroll_offset)
