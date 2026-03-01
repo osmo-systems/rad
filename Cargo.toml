@@ -2,10 +2,15 @@
 name = "lazyradio"
 version = "0.1.0"
 edition = "2021"
+rust-version = "1.83"
 license = "MIT OR Apache-2.0"
-authors = ["lazyradio contributors"]
-description = "A terminal-based web radio player with advanced search"
-repository = "https://github.com/yourusername/lazyradio"
+authors = ["Mathieu Antoine"]
+description = "A lightning-fast terminal-based web radio player with advanced search, powered by Radio Browser"
+repository = "https://github.com/osmo-systems/lazyradio"
+homepage = "https://github.com/osmo-systems/lazyradio"
+keywords = ["radio", "tui", "terminal", "audio", "player"]
+categories = ["command-line-utilities", "multimedia::audio"]
+readme = "README.md"
 
 [dependencies]
 ratatui = "0.28"
