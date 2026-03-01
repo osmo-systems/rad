@@ -2,6 +2,10 @@
 name = "lazyradio"
 version = "0.1.0"
 edition = "2021"
+license = "MIT OR Apache-2.0"
+authors = ["lazyradio contributors"]
+description = "A terminal-based web radio player with advanced search"
+repository = "https://github.com/yourusername/lazyradio"
 
 [dependencies]
 ratatui = "0.28"
