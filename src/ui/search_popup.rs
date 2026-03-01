@@ -313,6 +313,10 @@ impl SearchPopup {
                         // No icon for field values (like "France", "Germany", etc.)
                         item.to_string()
                     }
+                    AutocompleteContext::InvalidComma => {
+                        // Should not happen (no items to display)
+                        item.to_string()
+                    }
                 };
                 ListItem::new(display_text).style(style)
             })
@@ -337,7 +341,7 @@ impl SearchPopup {
 
     fn render_error(&self, f: &mut Frame, area: Rect) {
         if let Some(error) = &self.parse_error {
-            let error_text = format!("Error: {}", error);
+            let error_text = format!("{}", error);
             let paragraph = Paragraph::new(error_text)
                 .style(Style::default().fg(Color::Red));
             f.render_widget(paragraph, area);
@@ -371,7 +375,7 @@ impl SearchPopup {
                 // Check if this is a field=value pair
                 if let Some(equals_pos) = part.find('=') {
                     let field = &part[..equals_pos];
-                    let value = &part[equals_pos..];
+                    let value_with_equals = &part[equals_pos..];
                     
                     // Check if field is valid
                     let field_style = if crate::search::parser::validate_field(&field.to_lowercase()) {
@@ -381,7 +385,22 @@ impl SearchPopup {
                     };
                     
                     spans.push(Span::styled(field.to_string(), field_style));
-                    spans.push(Span::raw(value.to_string()));
+                    
+                    // Check if this is a country or language field with commas
+                    let field_lower = field.to_lowercase();
+                    if (field_lower == "country" || field_lower == "language") && value_with_equals.contains(',') {
+                        // Highlight commas in red for country/language fields
+                        for ch in value_with_equals.chars() {
+                            if ch == ',' {
+                                spans.push(Span::styled(ch.to_string(), Style::default().fg(Color::Red)));
+                            } else {
+                                spans.push(Span::raw(ch.to_string()));
+                            }
+                        }
+                    } else {
+                        // Normal value rendering
+                        spans.push(Span::raw(value_with_equals.to_string()));
+                    }
                 } else {
                     // Not a field=value pair, might be incomplete
                     let style = if crate::search::parser::validate_field(&part.to_lowercase()) {

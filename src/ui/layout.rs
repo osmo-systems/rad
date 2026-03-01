@@ -107,20 +107,10 @@ fn draw_station_list(f: &mut Frame, app: &mut App, area: Rect, title: Line) {
         .enumerate()
         .map(|(i, station)| {
             let is_favorite = app.favorites.is_favorite(&station.station_uuid);
-            let fav_marker = if is_favorite { "♥ " } else { "  " };
             let status_marker = if station.is_online() { "●" } else { "○" };
             
-            let content = format!(
-                "{}{} {} - {} - {} - {}",
-                fav_marker,
-                status_marker,
-                station.name,
-                station.country,
-                station.format_codec(),
-                station.format_bitrate()
-            );
-
-            let style = if i == app.selected_index {
+            let is_selected = i == app.selected_index;
+            let base_style = if is_selected {
                 Style::default()
                     .fg(Color::Black)
                     .bg(Color::Yellow)
@@ -128,8 +118,38 @@ fn draw_station_list(f: &mut Frame, app: &mut App, area: Rect, title: Line) {
             } else {
                 Style::default().fg(Color::White)
             };
+            
+            // Build content with styled spans
+            let mut spans = vec![];
+            
+            // Left margin (2 chars): yellow star for favorites, spaces otherwise
+            if is_favorite {
+                // Yellow star emoji for favorites (unless selected, then use selection colors)
+                let star_style = if is_selected {
+                    base_style
+                } else {
+                    Style::default().fg(Color::Yellow)
+                };
+                spans.push(Span::styled("⭐", star_style));
+            } else {
+                // Empty margin for non-favorites
+                spans.push(Span::styled("  ", base_style));
+            }
+            
+            // Status marker (online/offline)
+            spans.push(Span::styled(status_marker, base_style));
+            
+            // Rest of the content
+            let content_text = format!(
+                " {} - {} - {} - {}",
+                station.name,
+                station.country,
+                station.format_codec(),
+                station.format_bitrate()
+            );
+            spans.push(Span::styled(content_text, base_style));
 
-            ListItem::new(content).style(style)
+            ListItem::new(Line::from(spans))
         })
         .collect();
 
@@ -387,10 +407,17 @@ fn draw_status_bar(f: &mut Frame, _app: &App, area: Rect) {
 
 fn draw_error_popup(f: &mut Frame, app: &App) {
     if let Some(ref error_msg) = app.error_popup {
-        // Calculate popup area (centered, 60% width, auto height)
+        // Calculate popup area (centered, 60% width, auto height based on content)
         let area = f.area();
         let popup_width = (area.width as f32 * 0.6).min(80.0) as u16;
-        let popup_height = 10u16; // Fixed height for error popup
+        
+        // Calculate height based on text content
+        // Account for: borders (2), error message lines, empty line (1), footer (1)
+        let content_width = popup_width.saturating_sub(4) as usize; // -4 for borders and padding
+        
+        // Estimate wrapped lines: count characters and divide by content width
+        let estimated_lines = (error_msg.len() as f32 / content_width as f32).ceil() as u16;
+        let popup_height = (estimated_lines + 4).max(6).min(area.height.saturating_sub(4)); // Min 6, max screen-4
         
         let popup_x = (area.width.saturating_sub(popup_width)) / 2;
         let popup_y = (area.height.saturating_sub(popup_height)) / 2;
@@ -407,8 +434,6 @@ fn draw_error_popup(f: &mut Frame, app: &App) {
         
         // Create the error message with wrapping
         let error_text = vec![
-            Line::from(Span::styled("Error", Style::default().fg(Color::Red).add_modifier(Modifier::BOLD))),
-            Line::from(""),
             Line::from(Span::raw(error_msg)),
             Line::from(""),
             Line::from(Span::styled("Press Esc/Enter to close, Ctrl+C to quit app", Style::default().fg(Color::Yellow))),

@@ -95,6 +95,7 @@ impl AutocompleteData {
 pub enum AutocompleteContext {
     FieldName,
     FieldValue(String),
+    InvalidComma, // For country/language fields with commas (no autocomplete)
 }
 
 /// Detect the autocomplete context at the cursor position
@@ -110,26 +111,33 @@ pub fn detect_context(input: &str, cursor_pos: usize) -> AutocompleteContext {
     let current_field_start = before_cursor.rfind(' ').map(|i| i + 1).unwrap_or(0);
     let current_field = &before_cursor[current_field_start..];
     
-    // Check if we're after an '=' or ','
-    if let Some(equals_pos) = current_field.rfind('=') {
-        // We're in a value context
-        let field_name = current_field[..equals_pos].trim().to_lowercase();
-        AutocompleteContext::FieldValue(field_name)
-    } else if current_field.contains(',') {
-        // We're after a comma, still in value context
+    // Check for comma FIRST (before checking for '='), since "country=France," contains both
+    if current_field.contains(',') {
+        // We're after a comma, check if it's a multi-value field
         // Find the field name by looking for the '=' before the comma
         if let Some(equals_pos) = before_cursor.rfind('=') {
-            if let Some(field_start) = before_cursor[..equals_pos].rfind(' ') {
-                let field_name = before_cursor[field_start+1..equals_pos].trim().to_lowercase();
-                AutocompleteContext::FieldValue(field_name)
+            let field_name = if let Some(field_start) = before_cursor[..equals_pos].rfind(' ') {
+                before_cursor[field_start+1..equals_pos].trim().to_lowercase()
             } else {
                 // '=' is at the start
-                let field_name = before_cursor[..equals_pos].trim().to_lowercase();
+                before_cursor[..equals_pos].trim().to_lowercase()
+            };
+            
+            // Only 'tag' field supports multiple values (comma-separated)
+            // country and language do NOT support multiple values
+            if field_name == "tag" {
                 AutocompleteContext::FieldValue(field_name)
+            } else {
+                // For country/language, comma is invalid - return InvalidComma to disable autocomplete
+                AutocompleteContext::InvalidComma
             }
         } else {
             AutocompleteContext::FieldName
         }
+    } else if let Some(equals_pos) = current_field.rfind('=') {
+        // We're in a value context (after '=' but no comma)
+        let field_name = current_field[..equals_pos].trim().to_lowercase();
+        AutocompleteContext::FieldValue(field_name)
     } else {
         // We're in a field name context
         AutocompleteContext::FieldName
@@ -150,6 +158,10 @@ pub fn get_suggestions(
     let context = detect_context(input, cursor_pos);
     
     match context {
+        AutocompleteContext::InvalidComma => {
+            // No suggestions for invalid comma in country/language fields
+            Vec::new()
+        }
         AutocompleteContext::FieldName => {
             // Get the current partial field name
             let current_field_start = before_cursor.rfind(' ').map(|i| i + 1).unwrap_or(0);

@@ -4,10 +4,10 @@ use std::fmt;
 #[derive(Debug, Clone, PartialEq)]
 pub struct SearchQuery {
     pub name: Option<String>,
-    pub country: Option<Vec<String>>,
+    pub country: Option<String>,
     pub countrycode: Option<String>,
     pub state: Option<String>,
-    pub language: Option<Vec<String>>,
+    pub language: Option<String>,
     pub tags: Option<Vec<String>>,
     pub codec: Option<String>,
     pub bitrate_min: Option<u32>,
@@ -206,18 +206,21 @@ pub fn parse_query(input: &str) -> Result<SearchQuery, ParseError> {
                 query.name = Some(value.to_string());
             }
             "country" => {
-                let countries: Vec<String> = value.split(',')
-                    .map(|s| s.trim().to_string())
-                    .filter(|s| !s.is_empty())
-                    .collect();
-                if countries.is_empty() {
+                if value.trim().is_empty() {
                     return Err(ParseError::InvalidValue {
                         field: "country".to_string(),
                         value: value.to_string(),
                         reason: "empty value".to_string(),
                     });
                 }
-                query.country = Some(countries);
+                if value.contains(',') {
+                    return Err(ParseError::InvalidValue {
+                        field: "country".to_string(),
+                        value: value.to_string(),
+                        reason: "multiple countries not supported (use single country only)".to_string(),
+                    });
+                }
+                query.country = Some(value.trim().to_string());
             }
             "countrycode" => {
                 if value.len() != 2 {
@@ -233,18 +236,21 @@ pub fn parse_query(input: &str) -> Result<SearchQuery, ParseError> {
                 query.state = Some(value.to_string());
             }
             "language" => {
-                let languages: Vec<String> = value.split(',')
-                    .map(|s| s.trim().to_string())
-                    .filter(|s| !s.is_empty())
-                    .collect();
-                if languages.is_empty() {
+                if value.trim().is_empty() {
                     return Err(ParseError::InvalidValue {
                         field: "language".to_string(),
                         value: value.to_string(),
                         reason: "empty value".to_string(),
                     });
                 }
-                query.language = Some(languages);
+                if value.contains(',') {
+                    return Err(ParseError::InvalidValue {
+                        field: "language".to_string(),
+                        value: value.to_string(),
+                        reason: "multiple languages not supported (use single language only)".to_string(),
+                    });
+                }
+                query.language = Some(value.trim().to_string());
             }
             "tag" => {
                 let tags: Vec<String> = value.split(',')
@@ -353,8 +359,8 @@ pub fn format_query(query: &SearchQuery) -> String {
     if let Some(name) = &query.name {
         parts.push(format!("name={}", name));
     }
-    if let Some(countries) = &query.country {
-        parts.push(format!("country={}", countries.join(",")));
+    if let Some(country) = &query.country {
+        parts.push(format!("country={}", country));
     }
     if let Some(countrycode) = &query.countrycode {
         parts.push(format!("countrycode={}", countrycode));
@@ -362,8 +368,8 @@ pub fn format_query(query: &SearchQuery) -> String {
     if let Some(state) = &query.state {
         parts.push(format!("state={}", state));
     }
-    if let Some(languages) = &query.language {
-        parts.push(format!("language={}", languages.join(",")));
+    if let Some(language) = &query.language {
+        parts.push(format!("language={}", language));
     }
     if let Some(tags) = &query.tags {
         parts.push(format!("tag={}", tags.join(",")));
