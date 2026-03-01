@@ -104,8 +104,14 @@ async fn main() -> Result<()> {
     // Initialize app (without player)
     let mut app = App::new(data_dir, api_client).await?;
     let player_cmd_tx = audio_player.get_command_sender();
-    app.player_cmd_tx = player_cmd_tx;
-    app.player_info.volume = app.config.default_volume;
+    app.player_cmd_tx = player_cmd_tx.clone();
+    
+    // Set restored volume in audio player
+    let restored_volume = app.player_info.volume;
+    if let Err(e) = player_cmd_tx.send(PlayerCommand::SetVolume(restored_volume)) {
+        tracing::warn!("Failed to set restored volume: {}", e);
+    }
+    
     info!("App initialized");
 
     // Load initial data
@@ -118,6 +124,13 @@ async fn main() -> Result<()> {
     }
     
     tracing::info!("Initial data loaded. Stations count: {}", app.stations.len());
+    
+    // Restore last session if available
+    if let (Some(station_name), Some(_station_url)) = (&app.config.last_station_name, &app.config.last_station_url) {
+        app.add_log(format!("Restored last session: {}", station_name));
+        // Station info is already set in PlayerInfo from App::new()
+        // State is Stopped, so it will show but not auto-play
+    }
 
     // Setup terminal
     enable_raw_mode()?;
@@ -157,7 +170,19 @@ async fn main() -> Result<()> {
         }
 
         // Update player info in app
-        app.player_info = audio_player.get_info();
+        let audio_info = audio_player.get_info();
+        
+        // Preserve restored station info if player hasn't started playing yet
+        // (audio player starts with empty station_name/url)
+        if audio_info.station_name.is_empty() && !app.player_info.station_name.is_empty() {
+            // Keep the restored station info, only update state and volume
+            app.player_info.state = audio_info.state;
+            app.player_info.volume = audio_info.volume;
+            app.player_info.error_message = audio_info.error_message;
+        } else {
+            // Normal case: audio player has station info, use it
+            app.player_info = audio_info;
+        }
         
         // Show error popup if player has error
         if let Some(ref err_msg) = app.player_info.error_message {
@@ -166,8 +191,8 @@ async fn main() -> Result<()> {
             }
         }
 
-        // Update visualizer
-        app.update_visualizer();
+        // Update animation frame
+        app.animation_frame = (app.animation_frame + 1) % 8;
 
         // Draw UI
         terminal.draw(|f| ui::draw(f, &mut app))?;
@@ -206,6 +231,12 @@ async fn main() -> Result<()> {
 }
 
 async fn handle_key_event(app: &mut App, key: KeyCode, modifiers: KeyModifiers) {
+    // Handle Ctrl+C to quit immediately
+    if modifiers.contains(KeyModifiers::CONTROL) && matches!(key, KeyCode::Char('c')) {
+        app.quit();
+        return;
+    }
+    
     // Handle help popup first
     if app.help_popup {
         match key {
@@ -326,6 +357,12 @@ async fn handle_key_event(app: &mut App, key: KeyCode, modifiers: KeyModifiers) 
             } else {
                 app.next_tab();
             }
+        }
+        KeyCode::Char('[') => {
+            app.prev_tab();
+        }
+        KeyCode::Char(']') => {
+            app.next_tab();
         }
         KeyCode::Char('1') => {
             if app.current_tab == app::Tab::Browse {

@@ -30,6 +30,7 @@ pub struct App {
     
     // Station lists
     pub stations: Vec<Station>,
+    pub browse_stations: Vec<Station>, // Cache for Browse tab stations
     pub selected_index: usize,
     pub scroll_offset: usize,
     
@@ -47,6 +48,7 @@ pub struct App {
     pub history: HistoryManager,
     pub cache: CacheManager,
     pub config: Config,
+    pub data_dir: PathBuf,
     
     // Loading state
     pub loading: bool,
@@ -65,9 +67,12 @@ pub struct App {
     pub browse_list_index: usize,
     pub browse_list_mode: bool,
     
-    // Visualizer
-    pub visualizer_data: Vec<f32>,
-    visualizer_time: f32,
+    // Animation
+    pub animation_frame: usize,
+    
+    // Status log
+    pub status_log: Vec<String>,
+    pub status_log_scroll: usize,
 }
 
 impl App {
@@ -81,11 +86,14 @@ impl App {
         let cache = CacheManager::new(&data_dir, config.cache_duration_secs)?;
         
         let (player_cmd_tx, _player_cmd_rx) = mpsc::unbounded_channel();
+        
+        // Restore session state from config
+        let restored_volume = config.last_volume.unwrap_or(config.default_volume);
         let player_info = PlayerInfo {
             state: crate::player::PlayerState::Stopped,
-            station_name: String::new(),
-            station_url: String::new(),
-            volume: config.default_volume,
+            station_name: config.last_station_name.clone().unwrap_or_default(),
+            station_url: config.last_station_url.clone().unwrap_or_default(),
+            volume: restored_volume,
             error_message: None,
         };
 
@@ -95,6 +103,7 @@ impl App {
             browse_mode: BrowseMode::Popular,
             
             stations: Vec::new(),
+            browse_stations: Vec::new(),
             selected_index: 0,
             scroll_offset: 0,
             
@@ -109,6 +118,7 @@ impl App {
             history,
             cache,
             config,
+            data_dir,
             
             loading: false,
             status_message: None,
@@ -122,10 +132,12 @@ impl App {
             browse_list_index: 0,
             browse_list_mode: false,
             
-            visualizer_data: vec![0.0; 50],
-            visualizer_time: 0.0,
+            animation_frame: 0,
+            
+            status_log: Vec::new(),
+            status_log_scroll: 0,
         };
-
+        
         Ok(app)
     }
     
@@ -144,8 +156,42 @@ impl App {
     pub fn quit(&mut self) {
         self.running = false;
     }
+    
+    pub fn add_log(&mut self, message: String) {
+        // Add timestamp to log message
+        let timestamp = chrono::Local::now().format("%H:%M:%S");
+        let log_entry = format!("[{}] {}", timestamp, message);
+        self.status_log.push(log_entry);
+        
+        // Keep only last 100 log entries
+        if self.status_log.len() > 100 {
+            self.status_log.remove(0);
+        }
+        
+        // Auto-scroll to bottom
+        if self.status_log.len() > 0 {
+            self.status_log_scroll = self.status_log.len().saturating_sub(1);
+        }
+    }
+    
+    pub fn scroll_log_up(&mut self) {
+        if self.status_log_scroll > 0 {
+            self.status_log_scroll -= 1;
+        }
+    }
+    
+    pub fn scroll_log_down(&mut self) {
+        if !self.status_log.is_empty() && self.status_log_scroll < self.status_log.len() - 1 {
+            self.status_log_scroll += 1;
+        }
+    }
 
     pub fn next_tab(&mut self) {
+        // Cache browse stations before switching away
+        if matches!(self.current_tab, Tab::Browse) {
+            self.browse_stations = self.stations.clone();
+        }
+        
         self.current_tab = match self.current_tab {
             Tab::Browse => Tab::Favorites,
             Tab::Favorites => Tab::History,
@@ -155,6 +201,11 @@ impl App {
     }
 
     pub fn prev_tab(&mut self) {
+        // Cache browse stations before switching away
+        if matches!(self.current_tab, Tab::Browse) {
+            self.browse_stations = self.stations.clone();
+        }
+        
         self.current_tab = match self.current_tab {
             Tab::Browse => Tab::History,
             Tab::Favorites => Tab::Browse,
@@ -254,6 +305,7 @@ impl App {
 
             // Send play command
             tracing::info!("Sending play command");
+            self.add_log(format!("Playing: {}", station.name));
             match self.player_cmd_tx.send(PlayerCommand::Play(
                 station.name.clone(),
                 station.url_resolved.clone(),
@@ -261,10 +313,20 @@ impl App {
                 Ok(_) => {
                     self.status_message = Some(format!("Playing: {}", station.name));
                     tracing::info!("Play command sent successfully to player");
+                    
+                    // Save station and volume to config
+                    self.config.update_session_state(
+                        self.player_info.volume,
+                        Some(station.name.clone()),
+                        Some(station.url_resolved.clone()),
+                    );
+                    let _ = self.config.save(&self.data_dir);
                 }
                 Err(e) => {
                     tracing::error!("Failed to send play command: {}", e);
-                    self.status_message = Some(format!("Failed to send play command: {}", e));
+                    let msg = format!("Failed to send play command: {}", e);
+                    self.status_message = Some(msg.clone());
+                    self.add_log(msg);
                     return Err(e.into());
                 }
             }
@@ -300,6 +362,15 @@ impl App {
         let new_volume = (self.player_info.volume + 0.05).min(1.0);
         self.player_cmd_tx.send(PlayerCommand::SetVolume(new_volume))?;
         self.player_info.volume = new_volume;
+        
+        // Save volume to config
+        self.config.update_session_state(
+            new_volume,
+            self.config.last_station_name.clone(),
+            self.config.last_station_url.clone(),
+        );
+        let _ = self.config.save(&self.data_dir);
+        
         Ok(())
     }
 
@@ -307,6 +378,15 @@ impl App {
         let new_volume = (self.player_info.volume - 0.05).max(0.0);
         self.player_cmd_tx.send(PlayerCommand::SetVolume(new_volume))?;
         self.player_info.volume = new_volume;
+        
+        // Save volume to config
+        self.config.update_session_state(
+            new_volume,
+            self.config.last_station_name.clone(),
+            self.config.last_station_url.clone(),
+        );
+        let _ = self.config.save(&self.data_dir);
+        
         Ok(())
     }
 
@@ -371,15 +451,22 @@ impl App {
             self.browse_mode = BrowseMode::Search;
             self.browse_list_mode = false;
             
+            self.add_log(format!("Searching for '{}'...", self.search_query));
+            
             match self.api_client.search_stations(&self.search_query, self.config.station_limit).await {
                 Ok(stations) => {
                     self.stations = stations;
+                    self.browse_stations = self.stations.clone(); // Cache for Browse tab
                     self.selected_index = 0;
                     self.search_mode = false;
-                    self.status_message = Some(format!("Found {} stations", self.stations.len()));
+                    let msg = format!("Found {} stations", self.stations.len());
+                    self.status_message = Some(msg.clone());
+                    self.add_log(msg);
                 }
                 Err(e) => {
-                    self.status_message = Some(format!("Search failed: {}", e));
+                    let msg = format!("Search failed: {}", e);
+                    self.status_message = Some(msg.clone());
+                    self.add_log(msg);
                 }
             }
             
@@ -504,6 +591,7 @@ impl App {
         match result {
             Ok(stations) => {
                 self.stations = stations;
+                self.browse_stations = self.stations.clone(); // Cache for Browse tab
                 self.selected_index = 0;
                 self.status_message = Some(format!("Loaded {} stations", self.stations.len()));
             }
@@ -519,16 +607,20 @@ impl App {
     pub async fn load_popular_stations(&mut self) -> Result<()> {
         self.loading = true;
         tracing::info!("Loading popular stations...");
+        self.add_log("Loading popular stations...".to_string());
         
         let cache_key = "popular";
         let stations = if let Some(cached) = self.cache.get(cache_key) {
             tracing::info!("Using cached popular stations: {} stations", cached.len());
+            self.add_log(format!("Loaded {} stations from cache", cached.len()));
             cached
         } else {
             tracing::info!("Fetching popular stations from API...");
+            self.add_log("Fetching stations from API...".to_string());
             match self.api_client.get_popular_stations(self.config.station_limit).await {
                 Ok(stations) => {
                     tracing::info!("Fetched {} popular stations from API", stations.len());
+                    self.add_log(format!("Fetched {} stations from API", stations.len()));
                     if let Err(e) = self.cache.set(cache_key, stations.clone()) {
                         tracing::warn!("Failed to cache stations: {}", e);
                     }
@@ -537,16 +629,21 @@ impl App {
                 Err(e) => {
                     tracing::error!("Failed to load popular stations: {}", e);
                     self.loading = false;
-                    self.status_message = Some(format!("Failed to load stations: {}", e));
+                    let msg = format!("Failed to load stations: {}", e);
+                    self.status_message = Some(msg.clone());
+                    self.add_log(msg);
                     return Err(e);
                 }
             }
         };
 
         self.stations = stations;
+        self.browse_stations = self.stations.clone(); // Cache for Browse tab
         self.selected_index = 0;
         self.loading = false;
-        self.status_message = Some(format!("Loaded {} popular stations", self.stations.len()));
+        let msg = format!("Loaded {} popular stations", self.stations.len());
+        self.status_message = Some(msg.clone());
+        self.add_log(msg);
         tracing::info!("Popular stations loaded successfully: {} stations", self.stations.len());
         
         Ok(())
@@ -555,7 +652,8 @@ impl App {
     pub fn reload_current_tab(&mut self) {
         match self.current_tab {
             Tab::Browse => {
-                // Keep current browse state
+                // Restore cached browse stations
+                self.stations = self.browse_stations.clone();
             }
             Tab::Favorites => {
                 self.stations = self.favorites.get_all()
@@ -619,69 +717,6 @@ impl App {
                     .collect();
                 self.selected_index = 0;
             }
-        }
-    }
-
-    pub fn update_visualizer(&mut self) {
-        if self.player_info.state == crate::player::PlayerState::Playing {
-            // Heartbeat/pulse pattern based on time
-            // Creates a medical monitor style pulse
-            self.visualizer_time += 0.15; // Speed of the heartbeat
-            
-            // Create a heartbeat pattern: double pulse (lub-dub)
-            let beat_cycle = self.visualizer_time % 2.0; // 2-second cycle
-            
-            let amplitude = if beat_cycle < 0.15 {
-                // First pulse (lub) - quick rise
-                (beat_cycle / 0.15).sin()
-            } else if beat_cycle < 0.3 {
-                // Fall from first pulse
-                ((0.3 - beat_cycle) / 0.15).sin() * 0.5
-            } else if beat_cycle < 0.5 {
-                // Second pulse (dub) - slightly smaller
-                ((beat_cycle - 0.3) / 0.2).sin() * 0.7
-            } else if beat_cycle < 0.7 {
-                // Fall from second pulse
-                ((0.7 - beat_cycle) / 0.2).sin() * 0.35
-            } else {
-                // Rest period between beats
-                let rest = (beat_cycle - 0.7) / 1.3;
-                (rest * std::f32::consts::PI).sin() * 0.1
-            };
-            
-            // Create wave pattern that spreads from center
-            let center = self.visualizer_data.len() / 2;
-            for i in 0..self.visualizer_data.len() {
-                let distance_from_center = ((i as f32 - center as f32).abs() / center as f32);
-                
-                // Phase shift based on distance from center (wave effect)
-                let phase = distance_from_center * 2.0;
-                let wave_time = self.visualizer_time - phase;
-                let wave_cycle = wave_time % 2.0;
-                
-                let bar_amplitude = if wave_cycle < 0.15 {
-                    (wave_cycle / 0.15).sin()
-                } else if wave_cycle < 0.3 {
-                    ((0.3 - wave_cycle) / 0.15).sin() * 0.5
-                } else if wave_cycle < 0.5 {
-                    ((wave_cycle - 0.3) / 0.2).sin() * 0.7
-                } else if wave_cycle < 0.7 {
-                    ((0.7 - wave_cycle) / 0.2).sin() * 0.35
-                } else {
-                    let rest = (wave_cycle - 0.7) / 1.3;
-                    (rest * std::f32::consts::PI).sin() * 0.1
-                };
-                
-                // Smooth transition
-                let target = bar_amplitude * (1.0 - distance_from_center * 0.3);
-                self.visualizer_data[i] = self.visualizer_data[i] * 0.6 + target * 0.4;
-            }
-        } else {
-            // Fade out when not playing
-            for i in 0..self.visualizer_data.len() {
-                self.visualizer_data[i] *= 0.85;
-            }
-            self.visualizer_time = 0.0;
         }
     }
 }

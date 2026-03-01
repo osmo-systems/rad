@@ -10,6 +10,14 @@ pub struct Config {
     pub max_history_entries: usize,
     pub default_volume: f32,
     pub station_limit: usize,
+    
+    // Session state
+    #[serde(default)]
+    pub last_volume: Option<f32>,
+    #[serde(default)]
+    pub last_station_name: Option<String>,
+    #[serde(default)]
+    pub last_station_url: Option<String>,
 }
 
 impl Default for Config {
@@ -19,6 +27,9 @@ impl Default for Config {
             max_history_entries: 50,
             default_volume: 0.5,
             station_limit: 100,
+            last_volume: None,
+            last_station_name: None,
+            last_station_url: None,
         }
     }
 }
@@ -47,6 +58,12 @@ impl Config {
         fs::write(&config_file, contents)
             .context("Failed to write config file")?;
         Ok(())
+    }
+    
+    pub fn update_session_state(&mut self, volume: f32, station_name: Option<String>, station_url: Option<String>) {
+        self.last_volume = Some(volume);
+        self.last_station_name = station_name;
+        self.last_station_url = station_url;
     }
 }
 

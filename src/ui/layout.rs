@@ -2,7 +2,7 @@ use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Clear, List, ListItem, Paragraph, Tabs, Wrap},
+    widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph, Wrap},
     Frame,
 };
 
@@ -13,17 +13,15 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(3),  // Tabs
-            Constraint::Min(10),    // Main content
-            Constraint::Length(8),  // Player + Visualizer
-            Constraint::Length(3),  // Status bar
+            Constraint::Min(10),    // Main content (includes tabs in title)
+            Constraint::Length(8),  // Player + Status log section
+            Constraint::Length(3),  // Shortcuts bar
         ])
         .split(f.area());
 
-    draw_tabs(f, app, chunks[0]);
-    draw_main_content(f, app, chunks[1]);
-    draw_player_and_visualizer(f, app, chunks[2]);
-    draw_status_bar(f, app, chunks[3]);
+    draw_main_content(f, app, chunks[0]);
+    draw_player_and_log(f, app, chunks[1]);
+    draw_status_bar(f, app, chunks[2]);
     
     // Draw popups on top of everything
     if app.help_popup {
@@ -36,79 +34,65 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     }
 }
 
-fn draw_tabs(f: &mut Frame, app: &App, area: Rect) {
-    let titles = vec!["Browse (1)", "Favorites (2)", "History (3)"];
-    let selected = match app.current_tab {
-        Tab::Browse => 0,
-        Tab::Favorites => 1,
-        Tab::History => 2,
-    };
-
-    let tabs = Tabs::new(titles)
-        .block(Block::default().borders(Borders::ALL).title("Tabs"))
-        .select(selected)
-        .style(Style::default().fg(Color::White))
-        .highlight_style(
-            Style::default()
-                .fg(Color::Yellow)
-                .add_modifier(Modifier::BOLD),
-        );
-
-    f.render_widget(tabs, area);
-}
-
 fn draw_main_content(f: &mut Frame, app: &mut App, area: Rect) {
+    // Build tab titles with color highlighting
+    let mode_suffix = if matches!(app.current_tab, Tab::Browse) {
+        let mode_name = match app.browse_mode {
+            BrowseMode::Popular => "Popular",
+            BrowseMode::Search => "Search",
+            BrowseMode::ByCountry => "By Country",
+            BrowseMode::ByGenre => "By Genre",
+            BrowseMode::ByLanguage => "By Language",
+        };
+        format!(": {}", mode_name)
+    } else {
+        String::new()
+    };
+    
+    let tab_title = Line::from(vec![
+        Span::styled(
+            format!("Browse(1){}", mode_suffix),
+            if matches!(app.current_tab, Tab::Browse) {
+                Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(Color::White)
+            }
+        ),
+        Span::raw("  "),
+        Span::styled(
+            "Favorites(2)",
+            if matches!(app.current_tab, Tab::Favorites) {
+                Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(Color::White)
+            }
+        ),
+        Span::raw("  "),
+        Span::styled(
+            "History(3)",
+            if matches!(app.current_tab, Tab::History) {
+                Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(Color::White)
+            }
+        ),
+    ]);
+    
     match app.current_tab {
-        Tab::Browse => draw_browse_tab(f, app, area),
-        Tab::Favorites => draw_station_list(f, app, area, "Favorites"),
-        Tab::History => draw_station_list(f, app, area, "Recently Played"),
+        Tab::Browse => draw_browse_tab(f, app, area, tab_title),
+        Tab::Favorites => draw_station_list(f, app, area, tab_title),
+        Tab::History => draw_station_list(f, app, area, tab_title),
     }
 }
 
-fn draw_browse_tab(f: &mut Frame, app: &mut App, area: Rect) {
+fn draw_browse_tab(f: &mut Frame, app: &mut App, area: Rect, title: Line) {
     if app.browse_list_mode {
         // Show browse list (countries, genres, languages)
         draw_browse_list(f, app, area);
     } else {
-        // Show station list
-        let chunks = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([Constraint::Length(3), Constraint::Min(5)])
-            .split(area);
-
-        draw_browse_mode_selector(f, app, chunks[0]);
-        draw_station_list(f, app, chunks[1], "Stations");
+        // Show station list directly (browse mode shown in tab title)
+        draw_station_list(f, app, area, title);
     }
-}
-
-fn draw_browse_mode_selector(f: &mut Frame, app: &App, area: Rect) {
-    let modes = vec![
-        ("Popular (F1)", BrowseMode::Popular),
-        ("Search (/)", BrowseMode::Search),
-        ("Country (F2)", BrowseMode::ByCountry),
-        ("Genre (F3)", BrowseMode::ByGenre),
-        ("Language (F4)", BrowseMode::ByLanguage),
-    ];
-
-    let items: Vec<Line> = modes
-        .iter()
-        .map(|(label, mode)| {
-            let style = if *mode == app.browse_mode {
-                Style::default()
-                    .fg(Color::Yellow)
-                    .add_modifier(Modifier::BOLD)
-            } else {
-                Style::default().fg(Color::White)
-            };
-            Line::from(Span::styled(*label, style))
-        })
-        .collect();
-
-    let paragraph = Paragraph::new(items)
-        .block(Block::default().borders(Borders::ALL).title("Browse Mode"))
-        .alignment(Alignment::Left);
-
-    f.render_widget(paragraph, area);
 }
 
 fn draw_browse_list(f: &mut Frame, app: &App, area: Rect) {
@@ -142,10 +126,13 @@ fn draw_browse_list(f: &mut Frame, app: &App, area: Rect) {
                 .title(format!("{} (Press Enter to select, Esc to go back)", title)),
         );
 
-    f.render_widget(list, area);
+    let mut state = ListState::default();
+    state.select(Some(app.browse_list_index));
+    
+    f.render_stateful_widget(list, area, &mut state);
 }
 
-fn draw_station_list(f: &mut Frame, app: &App, area: Rect, title: &str) {
+fn draw_station_list(f: &mut Frame, app: &App, area: Rect, title: Line) {
     if app.stations.is_empty() {
         let text = if app.loading {
             "Loading stations..."
@@ -194,34 +181,89 @@ fn draw_station_list(f: &mut Frame, app: &App, area: Rect, title: &str) {
         })
         .collect();
 
+    // Combine title line with station count in a single Line
+    let mut title_spans = title.spans;
+    title_spans.push(Span::raw(" ("));
+    title_spans.push(Span::styled(format!("{}", app.stations.len()), Style::default().fg(Color::Cyan)));
+    title_spans.push(Span::raw(" stations)"));
+    let full_title = Line::from(title_spans);
+
     let list = List::new(list_items).block(
         Block::default()
             .borders(Borders::ALL)
-            .title(format!("{} ({} stations)", title, app.stations.len())),
+            .title(full_title),
     );
 
-    f.render_widget(list, area);
+    let mut state = ListState::default();
+    state.select(Some(app.selected_index));
+    
+    f.render_stateful_widget(list, area, &mut state);
 }
 
-fn draw_player_and_visualizer(f: &mut Frame, app: &App, area: Rect) {
+fn draw_player_and_log(f: &mut Frame, app: &App, area: Rect) {
     let chunks = Layout::default()
         .direction(Direction::Horizontal)
-        .constraints([Constraint::Percentage(60), Constraint::Percentage(40)])
+        .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
         .split(area);
 
     draw_player(f, app, chunks[0]);
-    draw_visualizer(f, app, chunks[1]);
+    draw_status_log(f, app, chunks[1]);
+}
+
+fn draw_status_log(f: &mut Frame, app: &App, area: Rect) {
+    if app.status_log.is_empty() {
+        let paragraph = Paragraph::new("No status messages yet")
+            .block(Block::default().borders(Borders::ALL).title("Status Log"))
+            .alignment(Alignment::Center)
+            .style(Style::default().fg(Color::DarkGray));
+        f.render_widget(paragraph, area);
+        return;
+    }
+
+    // Create list items from status log
+    let list_items: Vec<ListItem> = app
+        .status_log
+        .iter()
+        .map(|msg| ListItem::new(msg.as_str()).style(Style::default().fg(Color::White)))
+        .collect();
+
+    let list = List::new(list_items)
+        .block(Block::default().borders(Borders::ALL).title("Status Log"));
+
+    let mut state = ListState::default();
+    state.select(Some(app.status_log_scroll));
+    
+    f.render_stateful_widget(list, area, &mut state);
+}
+
+fn get_player_icon(state: PlayerState, frame: usize) -> &'static str {
+    match state {
+        PlayerState::Playing => {
+            const PLAYING_ICONS: &[&str] = &["▁", "▂", "▃", "▄", "▅", "▆", "▇", "█"];
+            PLAYING_ICONS[frame % PLAYING_ICONS.len()]
+        }
+        PlayerState::Loading => {
+            const LOADING_ICONS: &[&str] = &["⣾", "⣽", "⣻", "⢿", "⡿", "⣟", "⣯", "⣷"];
+            LOADING_ICONS[frame % LOADING_ICONS.len()]
+        }
+        PlayerState::Paused => "⏸",
+        PlayerState::Stopped => "⏹",
+        PlayerState::Error => "❌",
+    }
 }
 
 fn draw_player(f: &mut Frame, app: &App, area: Rect) {
     let info = &app.player_info;
+    
+    // Get animated icon based on state
+    let icon = get_player_icon(info.state, app.animation_frame);
 
     let state_text = match info.state {
-        PlayerState::Playing => "▶ Playing",
-        PlayerState::Paused => "⏸ Paused",
-        PlayerState::Stopped => "⏹ Stopped",
-        PlayerState::Loading => "⏳ Loading...",
-        PlayerState::Error => "❌ Error",
+        PlayerState::Playing => format!("{} Playing", icon),
+        PlayerState::Paused => format!("{} Paused", icon),
+        PlayerState::Stopped => format!("{} Stopped", icon),
+        PlayerState::Loading => format!("{} Loading...", icon),
+        PlayerState::Error => format!("{} Error", icon),
     };
 
     let state_color = match info.state {
@@ -268,108 +310,41 @@ fn draw_player(f: &mut Frame, app: &App, area: Rect) {
     f.render_widget(paragraph, area);
 }
 
-fn draw_visualizer(f: &mut Frame, app: &App, area: Rect) {
-    let inner = Block::default()
-        .borders(Borders::ALL)
-        .title("Visualizer")
-        .inner(area);
-
-    let block = Block::default().borders(Borders::ALL).title("Visualizer");
-    f.render_widget(block, area);
-
-    if inner.height < 2 || inner.width < 2 {
-        return;
-    }
-
-    let bar_width = (inner.width as usize / app.visualizer_data.len()).max(1);
-    let max_height = inner.height.saturating_sub(1) as usize;
-
-    for (i, &value) in app.visualizer_data.iter().enumerate() {
-        let bar_height = (value * max_height as f32) as u16;
-        let x = inner.x + (i * bar_width) as u16;
-
-        // Use different characters and colors based on height for a cooler effect
-        for y in 0..bar_height.min(max_height as u16) {
-            let cell_y = inner.y + inner.height - 1 - y;
-            if cell_y >= inner.y && cell_y < inner.y + inner.height {
-                if let Some(cell) = f.buffer_mut().cell_mut((x, cell_y)) {
-                    // Calculate height percentage for color gradients
-                    let height_percent = y as f32 / bar_height.max(1) as f32;
-                    
-                    // Choose character based on position
-                    let ch = if y == bar_height - 1 {
-                        '▀' // Top of bar
-                    } else if height_percent > 0.7 {
-                        '█' // Solid block for top portion
-                    } else if height_percent > 0.4 {
-                        '▓' // Medium shade
-                    } else {
-                        '▒' // Light shade
-                    };
-                    
-                    // Color gradient from blue (bottom) to cyan to yellow to red (top)
-                    let color = if height_percent > 0.85 {
-                        Color::Red
-                    } else if height_percent > 0.65 {
-                        Color::LightRed
-                    } else if height_percent > 0.45 {
-                        Color::Yellow
-                    } else if height_percent > 0.25 {
-                        Color::LightCyan
-                    } else {
-                        Color::Cyan
-                    };
-                    
-                    cell.set_char(ch);
-                    cell.set_fg(color);
-                }
-            }
-        }
-    }
-}
-
 fn draw_status_bar(f: &mut Frame, app: &App, area: Rect) {
-    let mut lines = vec![];
-
-    // Search mode
-    if app.search_mode {
-        lines.push(Line::from(vec![
+    let line = if app.search_mode {
+        // Search mode display
+        Line::from(vec![
             Span::styled("Search: ", Style::default().fg(Color::Cyan)),
             Span::raw(&app.search_query),
             Span::styled("_", Style::default().add_modifier(Modifier::SLOW_BLINK)),
-            Span::styled(" (Press Enter to search, Esc to cancel)", Style::default().fg(Color::DarkGray)),
-        ]));
-    }
-
-    // Status message
-    if let Some(ref msg) = app.status_message {
-        lines.push(Line::from(Span::styled(msg, Style::default().fg(Color::Green))));
-    }
-
-    // Main shortcuts line - always show when not in search mode
-    if !app.search_mode {
-        lines.push(Line::from(vec![
+            Span::styled(" | Enter:Search  Esc:Cancel", Style::default().fg(Color::DarkGray)),
+        ])
+    } else {
+        // Main shortcuts - compact single line
+        Line::from(vec![
             Span::styled("↑↓", Style::default().fg(Color::Yellow)),
-            Span::raw(" Nav  "),
+            Span::raw(":Nav  "),
             Span::styled("Enter", Style::default().fg(Color::Yellow)),
-            Span::raw(" Play  "),
+            Span::raw(":Play  "),
             Span::styled("Space", Style::default().fg(Color::Yellow)),
-            Span::raw(" Pause  "),
+            Span::raw(":Pause  "),
             Span::styled("S", Style::default().fg(Color::Yellow)),
-            Span::raw(" Stop  "),
+            Span::raw(":Stop  "),
             Span::styled("+-", Style::default().fg(Color::Yellow)),
-            Span::raw(" Vol  "),
+            Span::raw(":Vol  "),
             Span::styled("F", Style::default().fg(Color::Yellow)),
-            Span::raw(" Fav  "),
+            Span::raw(":Fav  "),
+            Span::styled("[]", Style::default().fg(Color::Yellow)),
+            Span::raw(":Switch tab  "),
             Span::styled("?", Style::default().fg(Color::Yellow)),
-            Span::raw(" Help  "),
-            Span::styled("Q", Style::default().fg(Color::Yellow)),
-            Span::raw(" Quit"),
-        ]));
-    }
+            Span::raw(":Help  "),
+            Span::styled("Ctrl+C", Style::default().fg(Color::Yellow)),
+            Span::raw(":Quit"),
+        ])
+    };
 
-    let paragraph = Paragraph::new(lines)
-        .block(Block::default().borders(Borders::ALL).title("Status"))
+    let paragraph = Paragraph::new(line)
+        .block(Block::default().borders(Borders::ALL).title("Shortcuts"))
         .alignment(Alignment::Left);
 
     f.render_widget(paragraph, area);
@@ -450,7 +425,7 @@ fn draw_help_popup(f: &mut Frame) {
             Span::raw("Navigate station list"),
         ]),
         Line::from(vec![
-            Span::styled("  Tab         ", Style::default().fg(Color::Yellow)),
+            Span::styled("  Tab / [ ]   ", Style::default().fg(Color::Yellow)),
             Span::raw("Switch between tabs (Browse/Favorites/History)"),
         ]),
         Line::from(vec![
@@ -507,7 +482,7 @@ fn draw_help_popup(f: &mut Frame) {
         ]),
         Line::from(""),
         Line::from(vec![
-            Span::styled("  q           ", Style::default().fg(Color::Yellow)),
+            Span::styled("  Ctrl+C      ", Style::default().fg(Color::Yellow)),
             Span::raw("Quit application"),
         ]),
         Line::from(""),
