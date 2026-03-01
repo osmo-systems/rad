@@ -55,6 +55,9 @@ pub struct App {
     // Error popup
     pub error_popup: Option<String>,
     
+    // Help popup
+    pub help_popup: bool,
+    
     // Lists for browse modes
     pub countries: Vec<String>,
     pub genres: Vec<String>,
@@ -110,6 +113,7 @@ impl App {
             status_message: None,
             
             error_popup: None,
+            help_popup: false,
             
             countries: Vec::new(),
             genres: Vec::new(),

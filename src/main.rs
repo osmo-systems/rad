@@ -206,7 +206,18 @@ async fn main() -> Result<()> {
 }
 
 async fn handle_key_event(app: &mut App, key: KeyCode, modifiers: KeyModifiers) {
-    // Handle error popup first (takes priority)
+    // Handle help popup first
+    if app.help_popup {
+        match key {
+            KeyCode::Esc | KeyCode::Char('?') => {
+                app.help_popup = false;
+            }
+            _ => {}
+        }
+        return;
+    }
+    
+    // Handle error popup (takes priority after help)
     if app.error_popup.is_some() {
         match key {
             KeyCode::Esc | KeyCode::Enter => {
@@ -257,6 +268,9 @@ async fn handle_key_event(app: &mut App, key: KeyCode, modifiers: KeyModifiers) 
     }
 
     match key {
+        KeyCode::Char('?') => {
+            app.help_popup = true;
+        }
         KeyCode::Char('q') | KeyCode::Char('Q') => app.quit(),
         KeyCode::Up => app.select_prev(),
         KeyCode::Down => app.select_next(),

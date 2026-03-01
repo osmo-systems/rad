@@ -25,6 +25,11 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     draw_player_and_visualizer(f, app, chunks[2]);
     draw_status_bar(f, app, chunks[3]);
     
+    // Draw popups on top of everything
+    if app.help_popup {
+        draw_help_popup(f);
+    }
+    
     // Draw error popup on top of everything if present
     if app.error_popup.is_some() {
         draw_error_popup(f, app);
@@ -233,27 +238,26 @@ fn draw_player(f: &mut Frame, app: &App, area: Rect) {
         format!("{}{}",  "█".repeat(filled), "░".repeat(empty))
     };
 
+    // Show the currently playing station name prominently
+    let station_display = if !info.station_name.is_empty() {
+        info.station_name.clone()
+    } else {
+        "No station selected".to_string()
+    };
+
     let lines = vec![
         Line::from(vec![
             Span::styled(state_text, Style::default().fg(state_color).add_modifier(Modifier::BOLD)),
         ]),
         Line::from(""),
         Line::from(vec![
-            Span::styled("Station: ", Style::default().fg(Color::Cyan)),
-            Span::raw(if info.station_name.is_empty() {
-                "None".to_string()
-            } else {
-                info.station_name.clone()
-            }),
-        ]),
-        Line::from(vec![
-            Span::styled("Volume:  ", Style::default().fg(Color::Cyan)),
-            Span::raw(format!("{} {}%", volume_bar, (info.volume * 100.0) as u8)),
+            Span::styled("♫ ", Style::default().fg(Color::Magenta)),
+            Span::styled(&station_display, Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
         ]),
         Line::from(""),
         Line::from(vec![
-            Span::styled("Controls: ", Style::default().fg(Color::Cyan)),
-            Span::raw("Enter=Play Space=Pause/Resume S=Stop R=Reload +=Vol+ -=Vol-"),
+            Span::styled("Volume:  ", Style::default().fg(Color::Cyan)),
+            Span::raw(format!("{} {}%", volume_bar, (info.volume * 100.0) as u8)),
         ]),
     ];
 
@@ -284,12 +288,40 @@ fn draw_visualizer(f: &mut Frame, app: &App, area: Rect) {
         let bar_height = (value * max_height as f32) as u16;
         let x = inner.x + (i * bar_width) as u16;
 
+        // Use different characters and colors based on height for a cooler effect
         for y in 0..bar_height.min(max_height as u16) {
             let cell_y = inner.y + inner.height - 1 - y;
             if cell_y >= inner.y && cell_y < inner.y + inner.height {
                 if let Some(cell) = f.buffer_mut().cell_mut((x, cell_y)) {
-                    cell.set_char('█');
-                    cell.set_fg(Color::Cyan);
+                    // Calculate height percentage for color gradients
+                    let height_percent = y as f32 / bar_height.max(1) as f32;
+                    
+                    // Choose character based on position
+                    let ch = if y == bar_height - 1 {
+                        '▀' // Top of bar
+                    } else if height_percent > 0.7 {
+                        '█' // Solid block for top portion
+                    } else if height_percent > 0.4 {
+                        '▓' // Medium shade
+                    } else {
+                        '▒' // Light shade
+                    };
+                    
+                    // Color gradient from blue (bottom) to cyan to yellow to red (top)
+                    let color = if height_percent > 0.85 {
+                        Color::Red
+                    } else if height_percent > 0.65 {
+                        Color::LightRed
+                    } else if height_percent > 0.45 {
+                        Color::Yellow
+                    } else if height_percent > 0.25 {
+                        Color::LightCyan
+                    } else {
+                        Color::Cyan
+                    };
+                    
+                    cell.set_char(ch);
+                    cell.set_fg(color);
                 }
             }
         }
@@ -314,11 +346,25 @@ fn draw_status_bar(f: &mut Frame, app: &App, area: Rect) {
         lines.push(Line::from(Span::styled(msg, Style::default().fg(Color::Green))));
     }
 
-    // Help text
-    if !app.search_mode && app.status_message.is_none() {
+    // Main shortcuts line - always show when not in search mode
+    if !app.search_mode {
         lines.push(Line::from(vec![
-            Span::styled("Keys: ", Style::default().fg(Color::Cyan)),
-            Span::raw("↑/↓=Nav Enter=Play F1=Popular /=Search F=Fav V=Vote Tab=Switch Q=Quit"),
+            Span::styled("↑↓", Style::default().fg(Color::Yellow)),
+            Span::raw(" Nav  "),
+            Span::styled("Enter", Style::default().fg(Color::Yellow)),
+            Span::raw(" Play  "),
+            Span::styled("Space", Style::default().fg(Color::Yellow)),
+            Span::raw(" Pause  "),
+            Span::styled("S", Style::default().fg(Color::Yellow)),
+            Span::raw(" Stop  "),
+            Span::styled("+-", Style::default().fg(Color::Yellow)),
+            Span::raw(" Vol  "),
+            Span::styled("F", Style::default().fg(Color::Yellow)),
+            Span::raw(" Fav  "),
+            Span::styled("?", Style::default().fg(Color::Yellow)),
+            Span::raw(" Help  "),
+            Span::styled("Q", Style::default().fg(Color::Yellow)),
+            Span::raw(" Quit"),
         ]));
     }
 
@@ -371,4 +417,112 @@ fn draw_error_popup(f: &mut Frame, app: &App) {
         
         f.render_widget(paragraph, popup_area);
     }
+}
+
+fn draw_help_popup(f: &mut Frame) {
+    // Calculate popup area (centered, 70% width, auto height)
+    let area = f.area();
+    let popup_width = (area.width as f32 * 0.7).min(90.0) as u16;
+    let popup_height = 24u16;
+    
+    let popup_x = (area.width.saturating_sub(popup_width)) / 2;
+    let popup_y = (area.height.saturating_sub(popup_height)) / 2;
+    
+    let popup_area = Rect {
+        x: popup_x,
+        y: popup_y,
+        width: popup_width,
+        height: popup_height,
+    };
+    
+    // Clear the background
+    f.render_widget(Clear, popup_area);
+    
+    // Create the help text
+    let help_text = vec![
+        Line::from(Span::styled("Keyboard Shortcuts", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD))),
+        Line::from(""),
+        Line::from(vec![
+            Span::styled("Navigation", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+        ]),
+        Line::from(vec![
+            Span::styled("  ↑/↓ or j/k  ", Style::default().fg(Color::Yellow)),
+            Span::raw("Navigate station list"),
+        ]),
+        Line::from(vec![
+            Span::styled("  Tab         ", Style::default().fg(Color::Yellow)),
+            Span::raw("Switch between tabs (Browse/Favorites/History)"),
+        ]),
+        Line::from(vec![
+            Span::styled("  1/2/3       ", Style::default().fg(Color::Yellow)),
+            Span::raw("Jump to Browse/Favorites/History tab"),
+        ]),
+        Line::from(""),
+        Line::from(vec![
+            Span::styled("Playback", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+        ]),
+        Line::from(vec![
+            Span::styled("  Enter       ", Style::default().fg(Color::Yellow)),
+            Span::raw("Play selected station"),
+        ]),
+        Line::from(vec![
+            Span::styled("  Space       ", Style::default().fg(Color::Yellow)),
+            Span::raw("Pause/Resume playback"),
+        ]),
+        Line::from(vec![
+            Span::styled("  s           ", Style::default().fg(Color::Yellow)),
+            Span::raw("Stop playback"),
+        ]),
+        Line::from(vec![
+            Span::styled("  r           ", Style::default().fg(Color::Yellow)),
+            Span::raw("Reload current station"),
+        ]),
+        Line::from(vec![
+            Span::styled("  + / -       ", Style::default().fg(Color::Yellow)),
+            Span::raw("Increase/Decrease volume"),
+        ]),
+        Line::from(""),
+        Line::from(vec![
+            Span::styled("Browse & Search", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+        ]),
+        Line::from(vec![
+            Span::styled("  F1          ", Style::default().fg(Color::Yellow)),
+            Span::raw("Show popular stations"),
+        ]),
+        Line::from(vec![
+            Span::styled("  /           ", Style::default().fg(Color::Yellow)),
+            Span::raw("Search by name"),
+        ]),
+        Line::from(vec![
+            Span::styled("  F2/F3/F4    ", Style::default().fg(Color::Yellow)),
+            Span::raw("Browse by Country/Genre/Language"),
+        ]),
+        Line::from(vec![
+            Span::styled("  f           ", Style::default().fg(Color::Yellow)),
+            Span::raw("Toggle favorite on selected station"),
+        ]),
+        Line::from(vec![
+            Span::styled("  v           ", Style::default().fg(Color::Yellow)),
+            Span::raw("Vote for selected station"),
+        ]),
+        Line::from(""),
+        Line::from(vec![
+            Span::styled("  q           ", Style::default().fg(Color::Yellow)),
+            Span::raw("Quit application"),
+        ]),
+        Line::from(""),
+        Line::from(Span::styled("Press Esc or ? to close this help", Style::default().fg(Color::DarkGray))),
+    ];
+    
+    let paragraph = Paragraph::new(help_text)
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(Color::Yellow))
+                .title(" Help - LazyRadio ")
+                .title_style(Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD))
+        )
+        .alignment(Alignment::Left);
+    
+    f.render_widget(paragraph, popup_area);
 }
