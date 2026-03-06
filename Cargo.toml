@@ -12,6 +12,22 @@ keywords = ["radio", "tui", "terminal", "audio", "player"]
 categories = ["command-line-utilities", "multimedia::audio"]
 readme = "README.md"
 
+[lib]
+name = "lazyradio"
+path = "src/lib.rs"
+
+[[bin]]
+name = "tui"
+path = "src/bin/tui/main.rs"
+
+[[bin]]
+name = "cli"
+path = "src/bin/cli/main.rs"
+
+[[bin]]
+name = "player-daemon"
+path = "src/bin/player-daemon/main.rs"
+
 [dependencies]
 ratatui = "0.28"
 crossterm = "0.28"

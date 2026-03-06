@@ -1,13 +1,13 @@
 use anyhow::Result;
 use std::collections::HashMap;
 use std::path::PathBuf;
-use tokio::sync::mpsc;
 
-use crate::api::{RadioBrowserClient, Station};
-use crate::config::Config;
-use crate::player::{PlayerCommand, PlayerInfo};
-use crate::search::{AutocompleteData, SearchQuery, format_query, is_default_query};
-use crate::storage::{CacheManager, FavoritesManager, HistoryManager, SearchHistoryManager};
+use lazyradio::{
+    RadioBrowserClient, Station, Config, PlayerInfo,
+    search::{AutocompleteData, SearchQuery, format_query, is_default_query},
+    storage::{CacheManager, FavoritesManager, HistoryManager, SearchHistoryManager},
+    PlayerState, PlayerDaemonConnection,
+};
 use crate::ui::SearchPopup;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -50,7 +50,6 @@ pub struct App {
     
     // Player
     pub player_info: PlayerInfo,
-    pub player_cmd_tx: mpsc::UnboundedSender<PlayerCommand>,
     
     // API & Storage
     pub api_client: RadioBrowserClient,
@@ -98,6 +97,7 @@ impl App {
     pub async fn new(
         data_dir: PathBuf,
         mut api_client: RadioBrowserClient,
+        _daemon_conn: &mut PlayerDaemonConnection,
     ) -> Result<Self> {
         let config = Config::load(&data_dir)?;
         let favorites = FavoritesManager::new(&data_dir)?;
@@ -105,12 +105,10 @@ impl App {
         let cache = CacheManager::new(&data_dir, config.cache_duration_secs)?;
         let search_history = SearchHistoryManager::new(&data_dir)?;
         
-        let (player_cmd_tx, _player_cmd_rx) = mpsc::unbounded_channel();
-        
         // Restore session state from config
         let restored_volume = config.last_volume.unwrap_or(config.default_volume);
         let player_info = PlayerInfo {
-            state: crate::player::PlayerState::Stopped,
+            state: PlayerState::Stopped,
             station_name: config.last_station_name.clone().unwrap_or_default(),
             station_url: config.last_station_url.clone().unwrap_or_default(),
             volume: restored_volume,
@@ -144,7 +142,6 @@ impl App {
             highest_page_loaded: 0,
             
             player_info,
-            player_cmd_tx,
             
             api_client,
             favorites,
@@ -194,17 +191,13 @@ impl App {
         tracing::info!("close_error_popup called, was: {:?}", self.error_popup);
         self.error_popup = None;
         self.warning_popup = None;
-        // Send command to clear the error in the player
-        if let Err(e) = self.player_cmd_tx.send(PlayerCommand::ClearError) {
-            tracing::warn!("Failed to send ClearError command: {}", e);
-        }
-        tracing::info!("close_error_popup done, error cleared in player");
+        tracing::info!("close_error_popup done, error cleared");
     }
 
     // Search popup methods
 
     pub fn open_search_popup(&mut self) {
-        use crate::search::get_suggestions;
+        use lazyradio::search::get_suggestions;
         
         // Pre-fill with current query if not default
         let initial_query = if is_default_query(&self.current_query) {
@@ -544,7 +537,7 @@ impl App {
         self.stations.get(self.selected_index)
     }
 
-    pub async fn play_selected(&mut self) -> Result<()> {
+    pub async fn play_selected(&mut self, daemon_conn: &mut PlayerDaemonConnection) -> Result<()> {
         tracing::info!("play_selected called, stations count: {}, selected_index: {}", self.stations.len(), self.selected_index);
         
         if self.stations.is_empty() {
@@ -579,16 +572,13 @@ impl App {
                 tracing::warn!("Failed to add to history: {}", e);
             }
 
-            // Send play command
-            tracing::info!("Sending play command");
+            // Send play command to daemon
+            tracing::info!("Sending play command to daemon");
             self.add_log(format!("Playing: {}", station.name));
-            match self.player_cmd_tx.send(PlayerCommand::Play(
-                station.name.clone(),
-                station.url_resolved.clone(),
-            )) {
+            match daemon_conn.play(station.name.clone(), station.url_resolved.clone()).await {
                 Ok(_) => {
                     self.status_message = Some(format!("Playing: {}", station.name));
-                    tracing::info!("Play command sent successfully to player");
+                    tracing::info!("Play command sent successfully to daemon");
                     
                     // Save station and volume to config
                     self.config.update_session_state(
@@ -603,7 +593,7 @@ impl App {
                     let msg = format!("Failed to send play command: {}", e);
                     self.status_message = Some(msg.clone());
                     self.add_log(msg);
-                    return Err(e.into());
+                    return Err(e);
                 }
             }
         } else {
@@ -613,24 +603,24 @@ impl App {
         Ok(())
     }
 
-    pub fn pause(&mut self) -> Result<()> {
-        self.player_cmd_tx.send(PlayerCommand::Pause)?;
+    pub async fn pause(&mut self, daemon_conn: &mut PlayerDaemonConnection) -> Result<()> {
+        daemon_conn.pause().await?;
         Ok(())
     }
 
-    pub fn resume(&mut self) -> Result<()> {
-        self.player_cmd_tx.send(PlayerCommand::Resume)?;
+    pub async fn resume(&mut self, daemon_conn: &mut PlayerDaemonConnection) -> Result<()> {
+        daemon_conn.resume().await?;
         Ok(())
     }
 
-    pub fn play_restored(&mut self) -> Result<()> {
+    pub async fn play_restored(&mut self, daemon_conn: &mut PlayerDaemonConnection) -> Result<()> {
         // Play the restored station from player_info (used when restarting with last station)
         if !self.player_info.station_url.is_empty() {
             tracing::info!("Playing restored station: {}", self.player_info.station_name);
-            self.player_cmd_tx.send(PlayerCommand::Play(
+            daemon_conn.play(
                 self.player_info.station_name.clone(),
                 self.player_info.station_url.clone(),
-            ))?;
+            ).await?;
             self.add_log(format!("Playing: {}", self.player_info.station_name));
             self.status_message = Some(format!("Playing: {}", self.player_info.station_name));
         } else {
@@ -640,20 +630,20 @@ impl App {
         Ok(())
     }
 
-    pub fn stop(&mut self) -> Result<()> {
-        self.player_cmd_tx.send(PlayerCommand::Stop)?;
+    pub async fn stop(&mut self, daemon_conn: &mut PlayerDaemonConnection) -> Result<()> {
+        daemon_conn.stop().await?;
         Ok(())
     }
 
-    pub fn reload(&mut self) -> Result<()> {
-        self.player_cmd_tx.send(PlayerCommand::Reload)?;
+    pub async fn reload(&mut self, daemon_conn: &mut PlayerDaemonConnection) -> Result<()> {
+        daemon_conn.reload().await?;
         self.status_message = Some("Reloading station...".to_string());
         Ok(())
     }
 
-    pub fn volume_up(&mut self) -> Result<()> {
+    pub async fn volume_up(&mut self, daemon_conn: &mut PlayerDaemonConnection) -> Result<()> {
         let new_volume = (self.player_info.volume + 0.05).min(1.0);
-        self.player_cmd_tx.send(PlayerCommand::SetVolume(new_volume))?;
+        daemon_conn.set_volume(new_volume).await?;
         self.player_info.volume = new_volume;
         
         // Save volume to config
@@ -667,9 +657,9 @@ impl App {
         Ok(())
     }
 
-    pub fn volume_down(&mut self) -> Result<()> {
+    pub async fn volume_down(&mut self, daemon_conn: &mut PlayerDaemonConnection) -> Result<()> {
         let new_volume = (self.player_info.volume - 0.05).max(0.0);
-        self.player_cmd_tx.send(PlayerCommand::SetVolume(new_volume))?;
+        daemon_conn.set_volume(new_volume).await?;
         self.player_info.volume = new_volume;
         
         // Save volume to config

@@ -7,7 +7,7 @@ use ratatui::{
 };
 use std::time::Instant;
 
-use crate::search::{detect_context, parse_query, AutocompleteContext, ParseError};
+use lazyradio::search::{detect_context, parse_query, parser, AutocompleteContext, ParseError};
 
 pub struct SearchPopup {
     pub input: String,
@@ -380,12 +380,11 @@ impl SearchPopup {
                     let value_with_equals = &part[equals_pos..];
 
                     // Check if field is valid
-                    let field_style =
-                        if crate::search::parser::validate_field(&field.to_lowercase()) {
-                            Style::default().fg(Color::Green)
-                        } else {
-                            Style::default().fg(Color::Red)
-                        };
+                    let field_style = if parser::validate_field(&field.to_lowercase()) {
+                        Style::default().fg(Color::Green)
+                    } else {
+                        Style::default().fg(Color::Red)
+                    };
 
                     spans.push(Span::styled(field.to_string(), field_style));
 
@@ -411,7 +410,7 @@ impl SearchPopup {
                     }
                 } else {
                     // Not a field=value pair, might be incomplete
-                    let style = if crate::search::parser::validate_field(&part.to_lowercase()) {
+                    let style = if parser::validate_field(&part.to_lowercase()) {
                         Style::default().fg(Color::Green)
                     } else if !part.contains('=') {
                         Style::default().fg(Color::Yellow) // Incomplete

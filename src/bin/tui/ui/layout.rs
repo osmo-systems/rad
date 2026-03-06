@@ -7,37 +7,37 @@ use ratatui::{
 };
 
 use crate::app::{App, Tab};
-use crate::player::PlayerState;
+use lazyradio::PlayerState;
 
 pub fn draw(f: &mut Frame, app: &mut App) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(8),  // Player + Status log section (at top)
-            Constraint::Min(10),    // Main content (includes tabs in title)
-            Constraint::Length(1),  // Shortcuts bar (no border)
+            Constraint::Length(8), // Player + Status log section (at top)
+            Constraint::Min(10),   // Main content (includes tabs in title)
+            Constraint::Length(1), // Shortcuts bar (no border)
         ])
         .split(f.area());
 
     draw_player_and_log(f, app, chunks[0]);
     draw_main_content(f, app, chunks[1]);
     draw_status_bar(f, app, chunks[2]);
-    
+
     // Draw popups on top of everything
     if app.help_popup {
         draw_help_popup(f);
     }
-    
+
     // Draw search popup
     if let Some(ref popup) = app.search_popup {
         popup.render(f, f.area());
     }
-    
+
     // Draw error popup on top of everything if present
     if app.error_popup.is_some() {
         draw_error_popup(f, app);
     }
-    
+
     // Draw warning popup on top of everything if present
     if app.warning_popup.is_some() {
         draw_warning_popup(f, app);
@@ -50,31 +50,37 @@ fn draw_main_content(f: &mut Frame, app: &mut App, area: Rect) {
         Span::styled(
             "Browse",
             if matches!(app.current_tab, Tab::Browse) {
-                Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD)
             } else {
                 Style::default().fg(Color::White)
-            }
+            },
         ),
         Span::raw("  "),
         Span::styled(
             "Favorites",
             if matches!(app.current_tab, Tab::Favorites) {
-                Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD)
             } else {
                 Style::default().fg(Color::White)
-            }
+            },
         ),
         Span::raw("  "),
         Span::styled(
             "History",
             if matches!(app.current_tab, Tab::History) {
-                Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD)
             } else {
                 Style::default().fg(Color::White)
-            }
+            },
         ),
     ]);
-    
+
     // All tabs just show station lists now
     draw_station_list(f, app, area, tab_title);
 }
@@ -84,19 +90,19 @@ fn draw_station_list(f: &mut Frame, app: &mut App, area: Rect, title: Line) {
     // Each station takes 1 line, borders take 2 lines
     let visible_count = (area.height.saturating_sub(2)) as usize;
     app.visible_stations_count = visible_count.max(1);
-    
+
     if app.stations.is_empty() {
         let text = if app.loading {
             "Loading stations..."
         } else {
             "No stations loaded.\n\nPress / to search for stations\nPress F1 to load popular stations"
         };
-        
+
         let paragraph = Paragraph::new(text)
             .block(Block::default().borders(Borders::ALL).title(title))
             .alignment(Alignment::Center)
             .wrap(Wrap { trim: true });
-        
+
         f.render_widget(paragraph, area);
         return;
     }
@@ -108,7 +114,7 @@ fn draw_station_list(f: &mut Frame, app: &mut App, area: Rect, title: Line) {
         .map(|(i, station)| {
             let is_favorite = app.favorites.is_favorite(&station.station_uuid);
             let status_marker = if station.is_online() { "●" } else { "○" };
-            
+
             let is_selected = i == app.selected_index;
             let base_style = if is_selected {
                 Style::default()
@@ -118,10 +124,10 @@ fn draw_station_list(f: &mut Frame, app: &mut App, area: Rect, title: Line) {
             } else {
                 Style::default().fg(Color::White)
             };
-            
+
             // Build content with styled spans
             let mut spans = vec![];
-            
+
             // Left margin (2 chars): yellow star for favorites, spaces otherwise
             if is_favorite {
                 // Yellow star emoji for favorites (unless selected, then use selection colors)
@@ -135,10 +141,10 @@ fn draw_station_list(f: &mut Frame, app: &mut App, area: Rect, title: Line) {
                 // Empty margin for non-favorites
                 spans.push(Span::styled("  ", base_style));
             }
-            
+
             // Status marker (online/offline)
             spans.push(Span::styled(status_marker, base_style));
-            
+
             // Rest of the content
             let content_text = format!(
                 " {} - {} - {} - {}",
@@ -156,7 +162,10 @@ fn draw_station_list(f: &mut Frame, app: &mut App, area: Rect, title: Line) {
     // Combine title line with station count in a single Line
     let mut title_spans = title.spans;
     title_spans.push(Span::raw(" ("));
-    title_spans.push(Span::styled(format!("{}", app.stations.len()), Style::default().fg(Color::Cyan)));
+    title_spans.push(Span::styled(
+        format!("{}", app.stations.len()),
+        Style::default().fg(Color::Cyan),
+    ));
     title_spans.push(Span::raw(" stations)"));
     let full_title = Line::from(title_spans);
 
@@ -171,23 +180,22 @@ fn draw_station_list(f: &mut Frame, app: &mut App, area: Rect, title: Line) {
             .borders(Borders::ALL)
             .title(full_title)
             .title(
-                ratatui::widgets::block::Title::from(
-                    Span::styled(page_info, Style::default().fg(Color::Yellow))
-                )
+                ratatui::widgets::block::Title::from(Span::styled(
+                    page_info,
+                    Style::default().fg(Color::Yellow),
+                ))
                 .alignment(Alignment::Right)
-                .position(ratatui::widgets::block::Position::Top)
+                .position(ratatui::widgets::block::Position::Top),
             )
     } else {
-        Block::default()
-            .borders(Borders::ALL)
-            .title(full_title)
+        Block::default().borders(Borders::ALL).title(full_title)
     };
 
     let list = List::new(list_items).block(block);
 
     let mut state = ListState::default();
     state.select(Some(app.selected_index));
-    
+
     f.render_stateful_widget(list, area, &mut state);
 }
 
@@ -218,12 +226,12 @@ fn draw_status_log(f: &mut Frame, app: &App, area: Rect) {
         .map(|msg| ListItem::new(msg.as_str()).style(Style::default().fg(Color::White)))
         .collect();
 
-    let list = List::new(list_items)
-        .block(Block::default().borders(Borders::ALL).title("Status Log"));
+    let list =
+        List::new(list_items).block(Block::default().borders(Borders::ALL).title("Status Log"));
 
     let mut state = ListState::default();
     state.select(Some(app.status_log_scroll));
-    
+
     f.render_stateful_widget(list, area, &mut state);
 }
 
@@ -246,7 +254,7 @@ fn get_player_icon(state: PlayerState, frame: usize) -> &'static str {
 
 fn draw_player(f: &mut Frame, app: &App, area: Rect) {
     let info = &app.player_info;
-    
+
     // Get animated icon based on state
     let icon = get_player_icon(info.state, app.animation_frame);
 
@@ -262,7 +270,7 @@ fn draw_player(f: &mut Frame, app: &App, area: Rect) {
         PlayerState::Playing => Color::Green,
         PlayerState::Paused => Color::Yellow,
         PlayerState::Stopped => Color::Gray,
-        PlayerState::Loading => Color::Cyan,  // Changed from Blue for better visibility
+        PlayerState::Loading => Color::Cyan, // Changed from Blue for better visibility
         PlayerState::Error => Color::Red,
     };
 
@@ -270,7 +278,7 @@ fn draw_player(f: &mut Frame, app: &App, area: Rect) {
     let volume_bar = {
         let filled = (info.volume * 10.0) as usize;
         let empty = 10 - filled;
-        format!("{}{}",  "█".repeat(filled), "░".repeat(empty))
+        format!("{}{}", "█".repeat(filled), "░".repeat(empty))
     };
 
     // Show the currently playing station name prominently
@@ -300,23 +308,29 @@ fn draw_player(f: &mut Frame, app: &App, area: Rect) {
     };
 
     let lines = vec![
-        Line::from(""),  // Empty line for spacing
-        Line::from(vec![
-            Span::styled(&station_display, Style::default()
+        Line::from(""), // Empty line for spacing
+        Line::from(vec![Span::styled(
+            &station_display,
+            Style::default()
                 .fg(Color::White)
-                .add_modifier(Modifier::BOLD)),
-        ]),
-        Line::from(""),  // Empty line for spacing
+                .add_modifier(Modifier::BOLD),
+        )]),
+        Line::from(""), // Empty line for spacing
         Line::from(vec![
             Span::styled(icon, Style::default().fg(state_color)),
             Span::raw(" "),
-            Span::styled(state_name, Style::default().fg(state_color).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                state_name,
+                Style::default()
+                    .fg(state_color)
+                    .add_modifier(Modifier::BOLD),
+            ),
             Span::raw(" ".repeat(spacing)),
             Span::styled("Vol: ", Style::default().fg(Color::Cyan)),
             Span::styled(&volume_bar, Style::default().fg(Color::Cyan)),
             Span::raw(format!(" {}%", (info.volume * 100.0) as u8)),
         ]),
-        Line::from(""),  // Empty line for spacing
+        Line::from(""), // Empty line for spacing
     ];
 
     let paragraph = Paragraph::new(lines)
@@ -331,27 +345,27 @@ fn draw_status_bar(f: &mut Frame, _app: &App, area: Rect) {
     let margin_chunks = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([
-            Constraint::Length(1),  // Left margin
-            Constraint::Min(0),     // Content
-            Constraint::Length(1),  // Right margin
+            Constraint::Length(1), // Left margin
+            Constraint::Min(0),    // Content
+            Constraint::Length(1), // Right margin
         ])
         .split(area);
-    
+
     let content_area = margin_chunks[1];
-    
+
     // Split content area into left (shortcuts) and right (version)
     let chunks = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([
-            Constraint::Min(0),      // Shortcuts (takes remaining space)
-            Constraint::Length(20),  // Version info
+            Constraint::Min(0),     // Shortcuts (takes remaining space)
+            Constraint::Length(20), // Version info
         ])
         .split(content_area);
-    
+
     // Main shortcuts - compact single line with light blue
     let text_style = Style::default().fg(Color::Cyan);
     let key_style = Style::default().fg(Color::LightCyan);
-    
+
     let shortcuts_line = Line::from(vec![
         Span::styled("↑↓", key_style),
         Span::styled(":Nav", text_style),
@@ -387,21 +401,19 @@ fn draw_status_bar(f: &mut Frame, _app: &App, area: Rect) {
         Span::styled(":Quit", text_style),
     ]);
 
-    let shortcuts = Paragraph::new(shortcuts_line)
-        .alignment(Alignment::Left);
+    let shortcuts = Paragraph::new(shortcuts_line).alignment(Alignment::Left);
 
     f.render_widget(shortcuts, chunks[0]);
-    
+
     // Version info on the right
     let version = env!("CARGO_PKG_VERSION");
     let version_line = Line::from(vec![
         Span::styled("lazyradio ", text_style),
         Span::styled(version, key_style),
     ]);
-    
-    let version_widget = Paragraph::new(version_line)
-        .alignment(Alignment::Right);
-    
+
+    let version_widget = Paragraph::new(version_line).alignment(Alignment::Right);
+
     f.render_widget(version_widget, chunks[1]);
 }
 
@@ -410,46 +422,51 @@ fn draw_error_popup(f: &mut Frame, app: &App) {
         // Calculate popup area (centered, 60% width, auto height based on content)
         let area = f.area();
         let popup_width = (area.width as f32 * 0.6).min(80.0) as u16;
-        
+
         // Calculate height based on text content
         // Account for: borders (2), error message lines, empty line (1), footer (1)
         let content_width = popup_width.saturating_sub(4) as usize; // -4 for borders and padding
-        
+
         // Estimate wrapped lines: count characters and divide by content width
         let estimated_lines = (error_msg.len() as f32 / content_width as f32).ceil() as u16;
-        let popup_height = (estimated_lines + 4).max(6).min(area.height.saturating_sub(4)); // Min 6, max screen-4
-        
+        let popup_height = (estimated_lines + 4)
+            .max(6)
+            .min(area.height.saturating_sub(4)); // Min 6, max screen-4
+
         let popup_x = (area.width.saturating_sub(popup_width)) / 2;
         let popup_y = (area.height.saturating_sub(popup_height)) / 2;
-        
+
         let popup_area = Rect {
             x: popup_x,
             y: popup_y,
             width: popup_width,
             height: popup_height,
         };
-        
+
         // Clear the background
         f.render_widget(Clear, popup_area);
-        
+
         // Create the error message with wrapping
         let error_text = vec![
             Line::from(Span::raw(error_msg)),
             Line::from(""),
-            Line::from(Span::styled("Press Esc/Enter to close, Ctrl+C to quit app", Style::default().fg(Color::Yellow))),
+            Line::from(Span::styled(
+                "Press Esc/Enter to close, Ctrl+C to quit app",
+                Style::default().fg(Color::Yellow),
+            )),
         ];
-        
+
         let paragraph = Paragraph::new(error_text)
             .block(
                 Block::default()
                     .borders(Borders::ALL)
                     .border_style(Style::default().fg(Color::Red))
                     .title(" Error ")
-                    .title_style(Style::default().fg(Color::Red).add_modifier(Modifier::BOLD))
+                    .title_style(Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)),
             )
             .wrap(Wrap { trim: true })
             .alignment(Alignment::Left);
-        
+
         f.render_widget(paragraph, popup_area);
     }
 }
@@ -460,40 +477,52 @@ fn draw_warning_popup(f: &mut Frame, app: &App) {
         let area = f.area();
         let popup_width = (area.width as f32 * 0.6).min(80.0) as u16;
         let popup_height = 10u16; // Fixed height for warning popup
-        
+
         let popup_x = (area.width.saturating_sub(popup_width)) / 2;
         let popup_y = (area.height.saturating_sub(popup_height)) / 2;
-        
+
         let popup_area = Rect {
             x: popup_x,
             y: popup_y,
             width: popup_width,
             height: popup_height,
         };
-        
+
         // Clear the background
         f.render_widget(Clear, popup_area);
-        
+
         // Create the warning message with wrapping
         let warning_text = vec![
-            Line::from(Span::styled("Warning", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD))),
+            Line::from(Span::styled(
+                "Warning",
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD),
+            )),
             Line::from(""),
             Line::from(Span::raw(warning_msg)),
             Line::from(""),
-            Line::from(Span::styled("Press Esc/Enter to close", Style::default().fg(Color::Gray))),
+            Line::from(Span::styled(
+                "Press Esc/Enter to close",
+                Style::default().fg(Color::Gray),
+            )),
         ];
-        
+
         let paragraph = Paragraph::new(warning_text)
             .block(
                 Block::default()
                     .borders(Borders::ALL)
                     .border_style(Style::default().fg(Color::Yellow))
                     .title(" Warning ")
-                    .title_style(Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD))
+                    .title_style(
+                        Style::default()
+                            .fg(Color::Yellow)
+                            .add_modifier(Modifier::BOLD),
+                    ),
             )
             .wrap(Wrap { trim: true })
             .alignment(Alignment::Left);
-        
+
         f.render_widget(paragraph, popup_area);
     }
 }
@@ -503,27 +532,35 @@ fn draw_help_popup(f: &mut Frame) {
     let area = f.area();
     let popup_width = (area.width as f32 * 0.7).min(90.0) as u16;
     let popup_height = 24u16;
-    
+
     let popup_x = (area.width.saturating_sub(popup_width)) / 2;
     let popup_y = (area.height.saturating_sub(popup_height)) / 2;
-    
+
     let popup_area = Rect {
         x: popup_x,
         y: popup_y,
         width: popup_width,
         height: popup_height,
     };
-    
+
     // Clear the background
     f.render_widget(Clear, popup_area);
-    
+
     // Create the help text
     let help_text = vec![
-        Line::from(Span::styled("Keyboard Shortcuts", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD))),
+        Line::from(Span::styled(
+            "Keyboard Shortcuts",
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+        )),
         Line::from(""),
-        Line::from(vec![
-            Span::styled("Navigation", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
-        ]),
+        Line::from(vec![Span::styled(
+            "Navigation",
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        )]),
         Line::from(vec![
             Span::styled("  ↑/↓ or j/k  ", Style::default().fg(Color::Yellow)),
             Span::raw("Navigate station list"),
@@ -537,9 +574,12 @@ fn draw_help_popup(f: &mut Frame) {
             Span::raw("Jump to Browse/Favorites/History tab"),
         ]),
         Line::from(""),
-        Line::from(vec![
-            Span::styled("Playback", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
-        ]),
+        Line::from(vec![Span::styled(
+            "Playback",
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        )]),
         Line::from(vec![
             Span::styled("  Enter       ", Style::default().fg(Color::Yellow)),
             Span::raw("Play selected station"),
@@ -561,9 +601,12 @@ fn draw_help_popup(f: &mut Frame) {
             Span::raw("Increase/Decrease volume"),
         ]),
         Line::from(""),
-        Line::from(vec![
-            Span::styled("Browse & Search", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
-        ]),
+        Line::from(vec![Span::styled(
+            "Browse & Search",
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        )]),
         Line::from(vec![
             Span::styled("  F1          ", Style::default().fg(Color::Yellow)),
             Span::raw("Show popular stations"),
@@ -590,18 +633,25 @@ fn draw_help_popup(f: &mut Frame) {
             Span::raw("Quit application"),
         ]),
         Line::from(""),
-        Line::from(Span::styled("Press Esc or ? to close this help", Style::default().fg(Color::DarkGray))),
+        Line::from(Span::styled(
+            "Press Esc or ? to close this help",
+            Style::default().fg(Color::DarkGray),
+        )),
     ];
-    
+
     let paragraph = Paragraph::new(help_text)
         .block(
             Block::default()
                 .borders(Borders::ALL)
                 .border_style(Style::default().fg(Color::Yellow))
                 .title(" Help - LazyRadio ")
-                .title_style(Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD))
+                .title_style(
+                    Style::default()
+                        .fg(Color::Yellow)
+                        .add_modifier(Modifier::BOLD),
+                ),
         )
         .alignment(Alignment::Left);
-    
+
     f.render_widget(paragraph, popup_area);
 }
