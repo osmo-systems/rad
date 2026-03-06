@@ -9,6 +9,7 @@ use tracing::info;
 
 use lazyradio::{
     config::{cleanup_old_logs, get_data_dir, Config},
+    api::RadioBrowserClient,
     PlayerDaemonClient,
 };
 
@@ -217,6 +218,53 @@ async fn main() -> Result<()> {
             println!("Exiting LazyRadio CLI");
             return Ok(());
         }
+        Some("search") => {
+            // Search for stations: radiocli search "query"
+            match args.get(2) {
+                Some(query) => {
+                    // Create API client and search
+                    match RadioBrowserClient::new().await {
+                        Ok(mut api_client) => {
+                            println!("Searching for: {}", query);
+                            match api_client.search_stations(query, 5).await {
+                                Ok(stations) => {
+                                    if stations.is_empty() {
+                                        println!("No stations found for '{}'", query);
+                                    } else {
+                                        println!("\nTop {} results:\n", stations.len());
+                                        for (idx, station) in stations.iter().enumerate() {
+                                            println!("  {}. {}", idx + 1, station.name);
+                                            if !station.country.is_empty() {
+                                                print!("     Country: {}", station.country);
+                                            }
+                                            if !station.language.is_empty() {
+                                                print!(" | Language: {}", station.language);
+                                            }
+                                            println!();
+                                            println!("     URL: {}", station.url);
+                                            println!("     Votes: {} | Codec: {}", station.votes, station.codec);
+                                            println!();
+                                        }
+                                    }
+                                }
+                                Err(e) => {
+                                    eprintln!("Error: Failed to search stations: {}", e);
+                                    return Err(e);
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!("Error: Failed to initialize API client: {}", e);
+                            return Err(e);
+                        }
+                    }
+                }
+                None => {
+                    eprintln!("Error: Usage: radiocli search <query>");
+                    return Err(anyhow::anyhow!("Missing search query"));
+                }
+            }
+        }
         Some("help") | Some("-h") | Some("--help") => {
             print_help();
         }
@@ -246,6 +294,7 @@ fn print_help() {
     println!("│   volume <0-100>      - Set volume (0-100%)                │");
     println!("│   volume --up [amt]   - Increase volume (default 10%)      │");
     println!("│   volume --down [amt] - Decrease volume (default 10%)      │");
+    println!("│   search <query>      - Search for stations                │");
     println!("│   quit/exit           - Exit CLI                           │");
     println!("│   help                - Show this help message             │");
     println!("╰────────────────────────────────────────────────────────────╯\n");
