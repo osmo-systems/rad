@@ -1,6 +1,7 @@
 //! LazyRadio CLI Application
 //! 
 //! A command-line interface for browsing and playing radio stations from Radio Browser API.
+//! Uses the player daemon for audio playback control.
 
 use anyhow::Result;
 use std::io::{self, Write};
@@ -9,9 +10,8 @@ use tracing_subscriber;
 
 use lazyradio::{
     config::{cleanup_old_logs, get_data_dir},
-    player::{AudioPlayer, PlayerCommand, PlayerState},
     search::{parse_query, SearchQuery},
-    RadioBrowserClient, Station,
+    PlayerDaemonClient, RadioBrowserClient, Station,
 };
 
 #[tokio::main]
@@ -44,20 +44,20 @@ async fn main() -> Result<()> {
         }
     };
 
-    // Initialize audio player
-    let (mut audio_player, mut player_cmd_rx) = match AudioPlayer::new() {
-        Ok((player, rx)) => {
-            info!("Audio player initialized");
-            (player, rx)
+    // Connect to player daemon
+    let daemon_client = PlayerDaemonClient::new()?;
+    let mut daemon_conn = match daemon_client.connect().await {
+        Ok(conn) => {
+            info!("Connected to player daemon");
+            conn
         }
         Err(e) => {
-            eprintln!("Failed to initialize audio device: {}", e);
-            eprintln!("Please check that your audio output is properly configured.");
+            eprintln!("Failed to connect to player daemon: {}", e);
             return Err(e);
         }
     };
 
-    let player_cmd_tx = audio_player.get_command_sender();
+    let mut api_client = api_client;
 
     // Show welcome message
     println!("\n╭─────────────────────────────────────────────────────────────╮");
@@ -91,30 +91,42 @@ async fn main() -> Result<()> {
                 break;
             }
             ["status"] => {
-                let info = audio_player.get_info();
-                print_player_status(&info);
+                match daemon_conn.get_status().await {
+                    Ok(info) => print_player_status(&info),
+                    Err(e) => eprintln!("Failed to get player status: {}", e),
+                }
             }
             ["play", station_name, url] => {
-                player_cmd_tx.send(PlayerCommand::Play(station_name.to_string(), url.to_string()))?;
-                println!("Playing: {}", station_name);
+                match daemon_conn.play(station_name.to_string(), url.to_string()).await {
+                    Ok(_) => println!("Playing: {}", station_name),
+                    Err(e) => eprintln!("Failed to play station: {}", e),
+                }
             }
             ["pause"] => {
-                player_cmd_tx.send(PlayerCommand::Pause)?;
-                println!("Paused");
+                match daemon_conn.pause().await {
+                    Ok(_) => println!("Paused"),
+                    Err(e) => eprintln!("Failed to pause: {}", e),
+                }
             }
             ["resume"] => {
-                player_cmd_tx.send(PlayerCommand::Resume)?;
-                println!("Resumed");
+                match daemon_conn.resume().await {
+                    Ok(_) => println!("Resumed"),
+                    Err(e) => eprintln!("Failed to resume: {}", e),
+                }
             }
             ["stop"] => {
-                player_cmd_tx.send(PlayerCommand::Stop)?;
-                println!("Stopped");
+                match daemon_conn.stop().await {
+                    Ok(_) => println!("Stopped"),
+                    Err(e) => eprintln!("Failed to stop: {}", e),
+                }
             }
             ["volume", vol_str] => {
                 if let Ok(vol) = vol_str.parse::<f32>() {
                     let clamped_vol = vol.max(0.0).min(1.0);
-                    player_cmd_tx.send(PlayerCommand::SetVolume(clamped_vol))?;
-                    println!("Volume set to {:.0}%", clamped_vol * 100.0);
+                    match daemon_conn.set_volume(clamped_vol).await {
+                        Ok(_) => println!("Volume set to {:.0}%", clamped_vol * 100.0),
+                        Err(e) => eprintln!("Failed to set volume: {}", e),
+                    }
                 } else {
                     eprintln!("Invalid volume. Please use a value between 0 and 1");
                 }
@@ -122,18 +134,18 @@ async fn main() -> Result<()> {
             ["search", query] => {
                 match parse_query(query) {
                     Ok(search_query) => {
-                        match search_stations(&api_client, &search_query).await {
+                        match search_stations(&mut api_client, &search_query).await {
                             Ok(stations) => {
                                 println!("\nFound {} stations:\n", stations.len());
                          for (i, station) in stations.iter().enumerate().take(10) {
-                            println!(
-                                "{}: {} - {} [{}]",
-                                i + 1,
-                                station.name,
-                                if station.country.is_empty() { "Unknown" } else { &station.country },
-                                if station.language.is_empty() { "Unknown" } else { &station.language }
-                            );
-                        }
+                             println!(
+                                 "{}: {} - {} [{}]",
+                                 i + 1,
+                                 station.name,
+                                 if station.country.is_empty() { "Unknown" } else { &station.country },
+                                 if station.language.is_empty() { "Unknown" } else { &station.language }
+                             );
+                         }
                                 if stations.len() > 10 {
                                     println!("\n... and {} more stations", stations.len() - 10);
                                 }
@@ -151,7 +163,7 @@ async fn main() -> Result<()> {
             }
             ["popular", limit_str] => {
                 let limit = limit_str.parse::<usize>().unwrap_or(10);
-                match get_popular_stations(&api_client, limit).await {
+                match get_popular_stations(&mut api_client, limit).await {
                     Ok(stations) => {
                         println!("\nTop {} popular stations:\n", stations.len());
                         for (i, station) in stations.iter().enumerate() {
@@ -175,13 +187,9 @@ async fn main() -> Result<()> {
             }
         }
 
-        // Handle player command responses
-        while let Ok(cmd) = player_cmd_rx.try_recv() {
-            info!("Processing command from player");
-        }
+        // No need to handle command responses since we're using async daemon communication
     }
 
-    audio_player.shutdown();
     info!("LazyRadio CLI shutting down");
 
     Ok(())
@@ -211,11 +219,11 @@ fn print_player_status(info: &lazyradio::PlayerInfo) {
     println!(
         "│ State:       {}",
         match info.state {
-            PlayerState::Playing => "Playing",
-            PlayerState::Paused => "Paused",
-            PlayerState::Stopped => "Stopped",
-            PlayerState::Loading => "Loading",
-            PlayerState::Error => "Error",
+            lazyradio::PlayerState::Playing => "Playing",
+            lazyradio::PlayerState::Paused => "Paused",
+            lazyradio::PlayerState::Stopped => "Stopped",
+            lazyradio::PlayerState::Loading => "Loading",
+            lazyradio::PlayerState::Error => "Error",
         }
     );
     println!("│ Station:     {}", info.station_name.as_str());
@@ -227,30 +235,28 @@ fn print_player_status(info: &lazyradio::PlayerInfo) {
 }
 
 async fn search_stations(
-    client: &RadioBrowserClient,
+    client: &mut RadioBrowserClient,
     query: &SearchQuery,
 ) -> Result<Vec<Station>> {
-    // Format the query as a search string and call the API
-    // This is a simplified implementation
+    // Convert SearchQuery to a search string and call the API
     let mut search_parts = Vec::new();
 
     if let Some(name) = &query.name {
-        search_parts.push(format!("name:{}", name));
-    }
-    if let Some(country) = &query.country {
-        search_parts.push(format!("country:{}", country));
-    }
-    if let Some(language) = &query.language {
-        search_parts.push(format!("language:{}", language));
+        search_parts.push(name.as_str());
     }
 
     let search_str = search_parts.join(" ");
-    println!("Searching for: {}", if search_str.is_empty() { "all stations".to_string() } else { search_str });
-    Ok(Vec::new())
+    
+    // Use search_stations from the API client
+    // This is a simplified approach - just search by name for now
+    if search_str.is_empty() {
+        client.get_popular_stations(50).await
+    } else {
+        client.search_stations(&search_str, 50).await
+    }
 }
 
-async fn get_popular_stations(client: &RadioBrowserClient, limit: usize) -> Result<Vec<Station>> {
-    // This would call the API to fetch popular stations
-    // For now, return empty - in a real implementation, this would call the API
-    Ok(Vec::new())
+async fn get_popular_stations(client: &mut RadioBrowserClient, limit: usize) -> Result<Vec<Station>> {
+    // Fetch popular stations from the API
+    client.get_popular_stations(limit).await
 }

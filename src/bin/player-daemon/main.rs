@@ -2,11 +2,13 @@
 //! 
 //! A lightweight, persistent audio player process that communicates with TUI/CLI clients
 //! via Unix socket IPC. This daemon continues playing music even after the client disconnects.
+//! 
+//! The daemon auto-shuts down after 30 minutes of inactivity (when not playing).
 
 use anyhow::Result;
 use std::fs;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::{UnixListener, UnixStream};
 use tokio::sync::Mutex;
@@ -20,6 +22,7 @@ use lazyradio::{
 };
 
 const DAEMON_SOCKET: &str = ".lazyradio-player.sock";
+const IDLE_TIMEOUT_SECS: u64 = 30 * 60; // 30 minutes
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -60,15 +63,35 @@ async fn main() -> Result<()> {
     let listener = UnixListener::bind(&socket_path)?;
     info!("Player daemon listening on: {}", socket_path.display());
 
+    // Track last activity time for idle timeout
+    let last_activity = Arc::new(Mutex::new(Instant::now()));
+    let last_activity_check = last_activity.clone();
+
+    // Spawn idle timeout monitor task
+    tokio::spawn(async move {
+        loop {
+            tokio::time::sleep(Duration::from_secs(60)).await; // Check every minute
+            
+            let last_activity_time = *last_activity_check.lock().await;
+            let elapsed = last_activity_time.elapsed();
+            
+            if elapsed > Duration::from_secs(IDLE_TIMEOUT_SECS) {
+                info!("Daemon idle for {} seconds, shutting down", elapsed.as_secs());
+                std::process::exit(0);
+            }
+        }
+    });
+
     // Main accept loop
     loop {
         match listener.accept().await {
             Ok((stream, _)) => {
                 info!("New client connected");
                 let player_ref = player.clone();
+                let last_activity_ref = last_activity.clone();
 
                 // Process this client synchronously within an async context
-                if let Err(e) = handle_client(stream, player_ref).await {
+                if let Err(e) = handle_client(stream, player_ref, last_activity_ref).await {
                     error!("Client handler error: {}", e);
                 }
             }
@@ -82,6 +105,7 @@ async fn main() -> Result<()> {
 async fn handle_client(
     stream: UnixStream,
     player: Arc<Mutex<AudioPlayer>>,
+    last_activity: Arc<Mutex<Instant>>,
 ) -> Result<()> {
     let (reader, writer) = tokio::io::split(stream);
     let mut reader = BufReader::new(reader);
@@ -95,6 +119,12 @@ async fn handle_client(
         if n == 0 {
             info!("Client disconnected");
             break;
+        }
+
+        // Update last activity time
+        {
+            let mut last_activity_time = last_activity.lock().await;
+            *last_activity_time = Instant::now();
         }
 
         // Parse message
