@@ -375,7 +375,13 @@ fn print_help() {
     println!("│   volume <0-100>      - Set volume (0-100%)                │");
     println!("│   volume --up [amt]   - Increase volume (default 10%)      │");
     println!("│   volume --down [amt] - Decrease volume (default 10%)      │");
-    println!("│   search <query>      - Search for stations                │");
+    println!("│ Search:                                                    │");
+    println!("│   search              - Interactive mode with prompts      │");
+    println!("│   search <query>      - Direct search (e.g., jazz)         │");
+    println!("│   search --country X  - Filter by country/language/codec   │");
+    println!("│   search --limit 20   - Set result limit (default: 100)    │");
+    println!("│   search --skip N     - Paginate results (N results)       │");
+    println!("│ Other:                                                     │");
     println!("│   quit/exit           - Exit CLI                           │");
     println!("│   help                - Show this help message             │");
     println!("╰────────────────────────────────────────────────────────────╯\n");
