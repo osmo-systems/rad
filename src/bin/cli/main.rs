@@ -1,17 +1,15 @@
 //! LazyRadio CLI Application
 //! 
-//! A command-line interface for browsing and playing radio stations from Radio Browser API.
-//! Uses the player daemon for audio playback control.
+//! A command-line interface for controlling the radio player daemon.
+//! Supports one-liner commands like: radiocli pause, radiocli volume 50, etc.
 
 use anyhow::Result;
-use std::io::{self, Write};
+use std::env;
 use tracing::info;
-use tracing_subscriber;
 
 use lazyradio::{
-    config::{cleanup_old_logs, get_data_dir},
-    search::{parse_query, SearchQuery},
-    PlayerDaemonClient, RadioBrowserClient, Station,
+    config::{cleanup_old_logs, get_data_dir, Config},
+    PlayerDaemonClient,
 };
 
 #[tokio::main]
@@ -24,27 +22,17 @@ async fn main() -> Result<()> {
         .with_ansi(false)
         .init();
 
-    info!("Starting LazyRadio CLI");
+    info!("LazyRadio CLI starting with args: {:?}", env::args().collect::<Vec<_>>());
 
     // Clean up old log files
     if let Err(e) = cleanup_old_logs(&data_dir, 7) {
         tracing::warn!("Failed to clean up old logs: {}", e);
     }
 
-    // Initialize API client
-    let api_client = match RadioBrowserClient::new().await {
-        Ok(client) => {
-            info!("API client initialized");
-            client
-        }
-        Err(e) => {
-            eprintln!("Failed to initialize Radio Browser API client: {}", e);
-            eprintln!("Please check your internet connection and DNS configuration.");
-            return Err(e);
-        }
-    };
+    // Get command line arguments
+    let args: Vec<String> = env::args().collect();
 
-    // Connect to player daemon
+    // Connect to player daemon (auto-starts if needed)
     let daemon_client = PlayerDaemonClient::new()?;
     let mut daemon_conn = match daemon_client.connect().await {
         Ok(conn) => {
@@ -52,211 +40,213 @@ async fn main() -> Result<()> {
             conn
         }
         Err(e) => {
-            eprintln!("Failed to connect to player daemon: {}", e);
+            eprintln!("Error: Failed to connect to player daemon: {}", e);
             return Err(e);
         }
     };
 
-    let mut api_client = api_client;
-
-    // Show welcome message
-    println!("\n╭─────────────────────────────────────────────────────────────╮");
-    println!("│ LazyRadio CLI - Radio Browser Terminal Client                │");
-    println!("│ Type 'help' for available commands                            │");
-    println!("╰─────────────────────────────────────────────────────────────╯\n");
-
-    // Command loop
-    let stdin = io::stdin();
-    let mut stdout = io::stdout();
-    let mut input = String::new();
-
-    loop {
-        print!("lazy-radio> ");
-        stdout.flush()?;
-        input.clear();
-        stdin.read_line(&mut input)?;
-
-        let input = input.trim();
-        if input.is_empty() {
-            continue;
-        }
-
-        let parts: Vec<&str> = input.split_whitespace().collect();
-        match parts.as_slice() {
-            ["help"] => {
-                print_help();
-            }
-            ["exit"] | ["quit"] => {
-                println!("Exiting LazyRadio CLI. Goodbye!");
-                break;
-            }
-            ["status"] => {
-                match daemon_conn.get_status().await {
-                    Ok(info) => print_player_status(&info),
-                    Err(e) => eprintln!("Failed to get player status: {}", e),
-                }
-            }
-            ["play", station_name, url] => {
-                match daemon_conn.play(station_name.to_string(), url.to_string()).await {
-                    Ok(_) => println!("Playing: {}", station_name),
-                    Err(e) => eprintln!("Failed to play station: {}", e),
-                }
-            }
-            ["pause"] => {
-                match daemon_conn.pause().await {
-                    Ok(_) => println!("Paused"),
-                    Err(e) => eprintln!("Failed to pause: {}", e),
-                }
-            }
-            ["resume"] => {
-                match daemon_conn.resume().await {
-                    Ok(_) => println!("Resumed"),
-                    Err(e) => eprintln!("Failed to resume: {}", e),
-                }
-            }
-            ["stop"] => {
-                match daemon_conn.stop().await {
-                    Ok(_) => println!("Stopped"),
-                    Err(e) => eprintln!("Failed to stop: {}", e),
-                }
-            }
-            ["volume", vol_str] => {
-                if let Ok(vol) = vol_str.parse::<f32>() {
-                    let clamped_vol = vol.max(0.0).min(1.0);
-                    match daemon_conn.set_volume(clamped_vol).await {
-                        Ok(_) => println!("Volume set to {:.0}%", clamped_vol * 100.0),
-                        Err(e) => eprintln!("Failed to set volume: {}", e),
-                    }
-                } else {
-                    eprintln!("Invalid volume. Please use a value between 0 and 1");
-                }
-            }
-            ["search", query] => {
-                match parse_query(query) {
-                    Ok(search_query) => {
-                        match search_stations(&mut api_client, &search_query).await {
-                            Ok(stations) => {
-                                println!("\nFound {} stations:\n", stations.len());
-                         for (i, station) in stations.iter().enumerate().take(10) {
-                             println!(
-                                 "{}: {} - {} [{}]",
-                                 i + 1,
-                                 station.name,
-                                 if station.country.is_empty() { "Unknown" } else { &station.country },
-                                 if station.language.is_empty() { "Unknown" } else { &station.language }
-                             );
-                         }
-                                if stations.len() > 10 {
-                                    println!("\n... and {} more stations", stations.len() - 10);
-                                }
-                                println!();
-                            }
-                            Err(e) => {
-                                eprintln!("Search failed: {}", e);
+    // Parse and execute commands
+    match args.get(1).map(|s| s.as_str()) {
+        None | Some("status") => {
+            // Show status or resume last station if daemon just started
+            match daemon_conn.get_status().await {
+                Ok(info) => {
+                    // If stopped and no station is playing, try to resume last station
+                    if info.state == lazyradio::PlayerState::Stopped 
+                        && info.station_name.is_empty() 
+                        && info.station_url.is_empty() {
+                        
+                        // Load config to get last station
+                        let config = Config::load(&data_dir)?;
+                        if let (Some(name), Some(url)) = (config.last_station_name, config.last_station_url) {
+                            info!("Resuming last station: {} ({})", name, url);
+                            if let Err(e) = daemon_conn.play(name.clone(), url.clone()).await {
+                                eprintln!("Error: Failed to resume last station: {}", e);
+                                // Continue and show status anyway
                             }
                         }
                     }
-                    Err(e) => {
-                        eprintln!("Invalid query: {}", e);
+                    
+                    // Show current status
+                    println!("\nPlayer Status:");
+                    println!("  State:       {}", match info.state {
+                        lazyradio::PlayerState::Playing => "Playing",
+                        lazyradio::PlayerState::Paused => "Paused",
+                        lazyradio::PlayerState::Stopped => "Stopped",
+                        lazyradio::PlayerState::Loading => "Loading",
+                        lazyradio::PlayerState::Error => "Error",
+                    });
+                    println!("  Station:     {}", if info.station_name.is_empty() { "None" } else { &info.station_name });
+                    println!("  Volume:      {:.0}%", info.volume * 100.0);
+                    if let Some(err) = &info.error_message {
+                        println!("  Error:       {}", err);
                     }
+                    println!();
                 }
-            }
-            ["popular", limit_str] => {
-                let limit = limit_str.parse::<usize>().unwrap_or(10);
-                match get_popular_stations(&mut api_client, limit).await {
-                    Ok(stations) => {
-                        println!("\nTop {} popular stations:\n", stations.len());
-                        for (i, station) in stations.iter().enumerate() {
-                            println!(
-                                "{}: {} - {} (votes: {})",
-                                i + 1,
-                                station.name,
-                                if station.country.is_empty() { "Unknown" } else { &station.country },
-                                station.votes
-                            );
-                        }
-                        println!();
-                    }
-                    Err(e) => {
-                        eprintln!("Failed to fetch popular stations: {}", e);
-                    }
+                Err(e) => {
+                    eprintln!("Error: Failed to get player status: {}", e);
+                    return Err(e);
                 }
-            }
-            _ => {
-                eprintln!("Unknown command. Type 'help' for available commands.");
             }
         }
-
-        // No need to handle command responses since we're using async daemon communication
+        Some("play") => {
+            // Resume playback
+            if let Err(e) = daemon_conn.resume().await {
+                eprintln!("Error: Failed to resume playback: {}", e);
+                return Err(e);
+            }
+            println!("Resumed");
+        }
+        Some("play-url") => {
+            // Play a station by name and URL: radiocli play-url "Station Name" "http://url"
+            match (args.get(2), args.get(3)) {
+                (Some(name), Some(url)) => {
+                    // Save station as last played
+                    let mut config = Config::load(&data_dir)?;
+                    config.update_session_state(config.default_volume, Some(name.clone()), Some(url.clone()));
+                    config.save(&data_dir)?;
+                    
+                    // Play the station
+                    if let Err(e) = daemon_conn.play(name.clone(), url.clone()).await {
+                        eprintln!("Error: Failed to play station: {}", e);
+                        return Err(e);
+                    }
+                    println!("Playing: {}", name);
+                }
+                _ => {
+                    eprintln!("Error: Usage: radiocli play-url <name> <url>");
+                    return Err(anyhow::anyhow!("Missing arguments for play-url command"));
+                }
+            }
+        }
+        Some("pause") => {
+            // Pause playback
+            if let Err(e) = daemon_conn.pause().await {
+                eprintln!("Error: Failed to pause playback: {}", e);
+                return Err(e);
+            }
+            println!("Paused");
+        }
+        Some("resume") => {
+            // Resume playback
+            if let Err(e) = daemon_conn.resume().await {
+                eprintln!("Error: Failed to resume playback: {}", e);
+                return Err(e);
+            }
+            println!("Resumed");
+        }
+        Some("stop") => {
+            // Stop playback
+            if let Err(e) = daemon_conn.stop().await {
+                eprintln!("Error: Failed to stop playback: {}", e);
+                return Err(e);
+            }
+            println!("Stopped");
+        }
+        Some("volume") => {
+            match args.get(2).map(|s| s.as_str()) {
+                Some("--up") => {
+                    // Increase volume by specified amount (default 10%)
+                    let amount = args.get(3)
+                        .and_then(|s| s.parse::<f32>().ok())
+                        .unwrap_or(10.0) / 100.0;
+                    
+                    match daemon_conn.get_status().await {
+                        Ok(info) => {
+                            let new_vol = (info.volume + amount).min(1.0);
+                            if let Err(e) = daemon_conn.set_volume(new_vol).await {
+                                eprintln!("Error: Failed to set volume: {}", e);
+                                return Err(e);
+                            }
+                            println!("Volume: {:.0}%", new_vol * 100.0);
+                        }
+                        Err(e) => {
+                            eprintln!("Error: Failed to get current volume: {}", e);
+                            return Err(e);
+                        }
+                    }
+                }
+                Some("--down") => {
+                    // Decrease volume by specified amount (default 10%)
+                    let amount = args.get(3)
+                        .and_then(|s| s.parse::<f32>().ok())
+                        .unwrap_or(10.0) / 100.0;
+                    
+                    match daemon_conn.get_status().await {
+                        Ok(info) => {
+                            let new_vol = (info.volume - amount).max(0.0);
+                            if let Err(e) = daemon_conn.set_volume(new_vol).await {
+                                eprintln!("Error: Failed to set volume: {}", e);
+                                return Err(e);
+                            }
+                            println!("Volume: {:.0}%", new_vol * 100.0);
+                        }
+                        Err(e) => {
+                            eprintln!("Error: Failed to get current volume: {}", e);
+                            return Err(e);
+                        }
+                    }
+                }
+                Some(vol_str) => {
+                    // Set volume to specified percentage (0-100)
+                    if let Ok(vol_percent) = vol_str.parse::<f32>() {
+                        let vol = (vol_percent / 100.0).max(0.0).min(1.0);
+                        if let Err(e) = daemon_conn.set_volume(vol).await {
+                            eprintln!("Error: Failed to set volume: {}", e);
+                            return Err(e);
+                        }
+                        println!("Volume: {:.0}%", vol * 100.0);
+                    } else {
+                        eprintln!("Error: Invalid volume. Use 0-100 for percentage, --up <amount>, or --down <amount>");
+                        return Err(anyhow::anyhow!("Invalid volume argument"));
+                    }
+                }
+                None => {
+                    // Show current volume
+                    match daemon_conn.get_status().await {
+                        Ok(info) => println!("Volume: {:.0}%", info.volume * 100.0),
+                        Err(e) => {
+                            eprintln!("Error: Failed to get volume: {}", e);
+                            return Err(e);
+                        }
+                    }
+                }
+            }
+        }
+        Some("quit") | Some("exit") => {
+            println!("Exiting LazyRadio CLI");
+            return Ok(());
+        }
+        Some("help") | Some("-h") | Some("--help") => {
+            print_help();
+        }
+        Some(cmd) => {
+            eprintln!("Error: Unknown command '{}'. Use 'radiocli help' for available commands.", cmd);
+            return Err(anyhow::anyhow!("Unknown command: {}", cmd));
+        }
     }
 
-    info!("LazyRadio CLI shutting down");
-
+    info!("LazyRadio CLI completed successfully");
     Ok(())
 }
 
 fn print_help() {
-    println!("\n╭─────────────────────────────────────────────────────────────╮");
-    println!("│ Available Commands                                            │");
-    println!("├─────────────────────────────────────────────────────────────┤");
-    println!("│ help                        - Show this help message          │");
-    println!("│ exit/quit                   - Exit the application            │");
-    println!("│ status                      - Show current player status      │");
-    println!("│ play <name> <url>           - Play a station                  │");
-    println!("│ pause                       - Pause playback                  │");
-    println!("│ resume                      - Resume playback                 │");
-    println!("│ stop                        - Stop playback                   │");
-    println!("│ volume <0-1>                - Set volume (0.0 to 1.0)        │");
-    println!("│ search <query>              - Search for stations             │");
-    println!("│ popular [limit]             - Show popular stations (def: 10) │");
-    println!("╰─────────────────────────────────────────────────────────────╯\n");
-}
-
-fn print_player_status(info: &lazyradio::PlayerInfo) {
-    println!("\n╭─────────────────────────────────────────────────────────────╮");
-    println!("│ Player Status                                                 │");
-    println!("├─────────────────────────────────────────────────────────────┤");
-    println!(
-        "│ State:       {}",
-        match info.state {
-            lazyradio::PlayerState::Playing => "Playing",
-            lazyradio::PlayerState::Paused => "Paused",
-            lazyradio::PlayerState::Stopped => "Stopped",
-            lazyradio::PlayerState::Loading => "Loading",
-            lazyradio::PlayerState::Error => "Error",
-        }
-    );
-    println!("│ Station:     {}", info.station_name.as_str());
-    println!("│ Volume:      {:.0}%", info.volume * 100.0);
-    if let Some(err) = &info.error_message {
-        println!("│ Error:       {}", err);
-    }
-    println!("╰─────────────────────────────────────────────────────────────╯\n");
-}
-
-async fn search_stations(
-    client: &mut RadioBrowserClient,
-    query: &SearchQuery,
-) -> Result<Vec<Station>> {
-    // Convert SearchQuery to a search string and call the API
-    let mut search_parts = Vec::new();
-
-    if let Some(name) = &query.name {
-        search_parts.push(name.as_str());
-    }
-
-    let search_str = search_parts.join(" ");
-    
-    // Use search_stations from the API client
-    // This is a simplified approach - just search by name for now
-    if search_str.is_empty() {
-        client.get_popular_stations(50).await
-    } else {
-        client.search_stations(&search_str, 50).await
-    }
-}
-
-async fn get_popular_stations(client: &mut RadioBrowserClient, limit: usize) -> Result<Vec<Station>> {
-    // Fetch popular stations from the API
-    client.get_popular_stations(limit).await
+    println!("\n╭────────────────────────────────────────────────────────────┐");
+    println!("│ LazyRadio CLI - Radio Player Control                       │");
+    println!("├────────────────────────────────────────────────────────────┤");
+    println!("│ Usage: radiocli <command> [options]                        │");
+    println!("│                                                            │");
+    println!("│ Commands:                                                  │");
+    println!("│   status              - Show current player status         │");
+    println!("│   play                - Resume playback                    │");
+    println!("│   play-url <n> <url>  - Play station and save as last      │");
+    println!("│   pause               - Pause playback                     │");
+    println!("│   resume              - Resume playback                    │");
+    println!("│   stop                - Stop playback                      │");
+    println!("│   volume <0-100>      - Set volume (0-100%)                │");
+    println!("│   volume --up [amt]   - Increase volume (default 10%)      │");
+    println!("│   volume --down [amt] - Decrease volume (default 10%)      │");
+    println!("│   quit/exit           - Exit CLI                           │");
+    println!("│   help                - Show this help message             │");
+    println!("╰────────────────────────────────────────────────────────────╯\n");
 }
