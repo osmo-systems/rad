@@ -47,10 +47,7 @@ impl RadioBrowserClient {
     async fn discover_servers() -> Result<Vec<String>> {
         debug!("Discovering Radio Browser servers via DNS");
         
-        let resolver = TokioAsyncResolver::tokio(
-            ResolverConfig::default(),
-            ResolverOpts::default(),
-        );
+        let resolver = Self::create_resolver().await?;
 
         let response = resolver
             .lookup_ip(API_DNS_NAME)
@@ -84,6 +81,32 @@ impl RadioBrowserClient {
         }
 
         Ok(base_urls)
+    }
+
+    async fn create_resolver() -> Result<TokioAsyncResolver> {
+        #[cfg(target_os = "macos")]
+        {
+            Self::create_resolver_macos()
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            Ok(TokioAsyncResolver::tokio(
+                ResolverConfig::default(),
+                ResolverOpts::default(),
+            ))
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    fn create_resolver_macos() -> Result<TokioAsyncResolver> {
+        debug!("Creating DNS resolver for macOS with explicit DNS servers");
+
+        // On macOS, /etc/resolv.conf is ignored and system DNS config cannot be reliably read
+        // Use Google Public DNS (or Cloudflare as fallback) instead
+        let config = ResolverConfig::google();
+
+        debug!("Using Google Public DNS (8.8.8.8, 8.8.4.4) for macOS DNS resolution");
+        Ok(TokioAsyncResolver::tokio(config, ResolverOpts::default()))
     }
 
     fn get_base_url(&self) -> &str {
