@@ -73,24 +73,28 @@ impl PlayerDaemonClient {
         
         let daemon_path = exe_dir.join(DAEMON_BINARY);
         
-        debug!("Attempting to start daemon from: {}", daemon_path.display());
+        info!("Current executable: {}", current_exe.display());
+        info!("Executable directory: {}", exe_dir.display());
+        info!("Attempting to start daemon from: {}", daemon_path.display());
         
         // First try the full path
         if daemon_path.exists() {
+            info!("Found daemon at: {}", daemon_path.display());
             Command::new(&daemon_path)
                 .spawn()
                 .context(format!("Failed to start player daemon from {}", daemon_path.display()))?;
-            debug!("Spawned player daemon from: {}", daemon_path.display());
+            info!("Spawned player daemon from: {}", daemon_path.display());
             return Ok(());
         }
         
+        info!("Daemon not found at {}, trying PATH", daemon_path.display());
+        
         // Fallback: try from PATH
-        debug!("Daemon not found at {}, trying PATH", daemon_path.display());
         Command::new(DAEMON_BINARY)
             .spawn()
             .context("Failed to start player daemon. Make sure 'player-daemon' is installed and in PATH or in the same directory as this executable")?;
 
-        debug!("Spawned player daemon process");
+        info!("Spawned player daemon process from PATH");
         Ok(())
     }
 
