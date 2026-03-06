@@ -2,6 +2,7 @@
 
 use anyhow::Result;
 use crossterm::event::{self, Event, KeyCode, KeyModifiers};
+use crossterm::terminal::{enable_raw_mode, disable_raw_mode};
 use std::{io::{self, Write}, time::Duration};
 use lazyradio::{
     api::{RadioBrowserClient, Station},
@@ -77,6 +78,8 @@ impl InteractiveSearch {
         }
 
         println!("\nCommands: [↑↓/jk] Navigate | [F] Favorite | [V] Vote | [Enter] Play | [n] Next | [q] Quit");
+        print!("\n> ");
+        let _ = io::stdout().flush();
     }
 
     /// Load search results
@@ -107,6 +110,19 @@ impl InteractiveSearch {
 
     /// Handle interactive navigation and actions
     pub async fn run(&mut self, query: SearchQuery, terminal_width: u16) -> Result<Option<(String, String)>> {
+        // Enable raw mode for keyboard input
+        enable_raw_mode()?;
+        
+        let result = self.run_inner(query, terminal_width).await;
+        
+        // Disable raw mode on exit (important for cleanup)
+        let _ = disable_raw_mode();
+        
+        result
+    }
+
+    /// Inner loop for interactive navigation (separated for proper cleanup)
+    async fn run_inner(&mut self, query: SearchQuery, terminal_width: u16) -> Result<Option<(String, String)>> {
         self.load_results(query.clone()).await?;
 
         loop {
