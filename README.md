@@ -2,7 +2,7 @@
 
 [![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](LICENSE-MIT)
 [![Rust 1.83+](https://img.shields.io/badge/rust-1.83%2B-orange.svg)](https://www.rust-lang.org)
-[![Platform: Linux | macOS | Windows](https://img.shields.io/badge/platform-Linux%20%7C%20macOS%20%7C%20Windows-lightgrey.svg)](https://github.com/osmo-systems/krofm)
+[![Platform: Linux | macOS | Windows](https://img.shields.io/badge/platform-Linux%20%7C%20macOS%20%7C%20Windows-lightgrey.svg)](https://github.com/osmo-systems/radm)
 
 A lightning-fast terminal-based web radio player with advanced search capabilities, powered by the [Radio Browser](https://www.radio-browser.info/) community database.
 
@@ -73,34 +73,41 @@ No additional dependencies required. Audio is handled through WASAPI.
 
 ### Building from Source
 
-1. **Install Rust 1.83 or later** (if not already installed):
+1. **Install Rust 1.93 or later** (if not already installed):
    ```bash
    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
    ```
 
 2. **Clone and build**:
    ```bash
-   git clone https://github.com/osmo-systems/krofm.git
-   cd krofm
-   cargo build --release
+   git clone https://github.com/osmo-systems/radm.git
+   cd radm
+   cargo build --workspace --release
    ```
 
-3. **Run**:
+3. **Run the TUI**:
    ```bash
-   cargo run --release
+   ./target/release/rad
    ```
 
 Or install globally:
 ```bash
-cargo install --path .
-krofm
+cargo install --path rad-tui
+rad
 ```
+
+**Note**: This project is organized as a Cargo workspace with multiple binaries:
+- `rad` - Terminal UI (main application)
+- `rad-cli` - Command-line interface for controlling playback
+- `_rad-daemon` - Background player daemon
+
+See [WORKSPACE.md](WORKSPACE.md) for more details on the workspace structure.
 
 ## Usage
 
 ### Quick Start
 
-1. Launch LazyRadio
+1. Launch LazyRadio with `rad`
 2. Press `/` to open the search popup
 3. Type a query like `name=jazz country=usa` or just `jazz`
 4. Use arrow keys to navigate results
@@ -219,9 +226,9 @@ This shows the most popular, working stations first.
 ### Data Storage
 
 All user data is stored in platform-specific directories:
-- **Linux**: `~/.local/share/krofm/`
-- **macOS**: `~/Library/Application Support/krofm/`
-- **Windows**: `%APPDATA%\krofm\`
+- **Linux**: `~/.local/share/radm/`
+- **macOS**: `~/Library/Application Support/radm/`
+- **Windows**: `%APPDATA%\radm\`
 
 Files stored:
 - `favorites.toml`: Your favorite stations
@@ -230,7 +237,7 @@ Files stored:
 - `session.toml`: Session state (last volume, last played station)
 - `config.toml`: Application configuration
 - `cache/`: Cached station lists
-- `krofm.log`: Application logs
+- `rad.log`, `rad-cli.log`, `rad-daemon.log`: Application logs
 
 ### Configuration
 
@@ -340,7 +347,7 @@ You can help improve the Radio Browser database:
 **"Failed to play station" error:**
 - The station stream URL might be offline or changed
 - Try another station
-- Check logs in `~/.local/share/krofm/krofm.log`
+- Check logs in `~/.local/share/radm/rad.log` (Linux) or equivalent on other platforms
 
 **Station loads but no audio:**
 - The codec might not be supported (though rodio supports most common formats: MP3, AAC, OGG, FLAC)

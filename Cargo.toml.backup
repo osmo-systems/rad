@@ -1,0 +1,59 @@
+[package]
+name = "radm"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.93"
+license = "MIT OR Apache-2.0"
+authors = ["Mathieu Antoine"]
+description = "A lightning-fast terminal-based web radio player with advanced search, powered by Radio Browser"
+repository = "https://github.com/osmo-systems/radm"
+homepage = "https://github.com/osmo-systems/radm"
+keywords = ["radio", "tui", "terminal", "audio", "player"]
+categories = ["command-line-utilities", "multimedia::audio"]
+readme = "README.md"
+
+[lib]
+name = "radm"
+path = "src/lib.rs"
+
+[[bin]]
+name = "radt"
+path = "src/bin/tui/main.rs"
+
+[[bin]]
+name = "radc"
+path = "src/bin/cli/main.rs"
+
+[[bin]]
+name = "rad-daemon"
+path = "src/bin/player-daemon/main.rs"
+
+[dependencies]
+ratatui = "0.28"
+crossterm = "0.28"
+tokio = { version = "1.42", features = ["full"] }
+reqwest = { version = "0.12", features = ["json", "stream"] }
+ureq = "2.10"
+rodio = { version = "0.19", features = ["symphonia-all"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+toml = "0.8"
+anyhow = "1.0"
+chrono = { version = "0.4", features = ["serde"] }
+dirs = "5.0"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tracing-appender = "0.2"
+trust-dns-resolver = "0.23"
+bytes = "1.5"
+rand = "0.8"
+unicode-width = "0.1"
+urlencoding = "2.1"
+futures-util = "0.3.32"
+stream-download = "0.24.0"
+cliclack = "0.2"
+
+[profile.release]
+strip = true      # Remove symbols for smaller binary
+opt-level = "z"   # Optimize for size
+lto = true        # Link Time Optimization

@@ -1,0 +1,28 @@
+[package]
+name = "rad-cli"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "Command-line interface for the radm radio player"
+keywords = ["radio", "cli", "audio", "player"]
+categories = ["command-line-utilities", "multimedia::audio"]
+
+[[bin]]
+name = "rad-cli"
+path = "src/main.rs"
+
+[dependencies]
+# Workspace dependencies
+rad-core = { path = "../rad-core" }
+tokio = { workspace = true }
+anyhow = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+tracing-appender = { workspace = true }
+
+# CLI-specific dependencies
+cliclack = "0.2"

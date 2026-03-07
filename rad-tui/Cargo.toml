@@ -1,0 +1,30 @@
+[package]
+name = "rad-tui"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "Terminal-based user interface for the radm radio player"
+keywords = ["radio", "tui", "terminal", "audio", "player"]
+categories = ["command-line-utilities", "multimedia::audio"]
+
+[[bin]]
+name = "rad"
+path = "src/main.rs"
+
+[dependencies]
+# Workspace dependencies
+rad-core = { path = "../rad-core" }
+tokio = { workspace = true }
+anyhow = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+tracing-appender = { workspace = true }
+chrono = { workspace = true }
+
+# TUI-specific dependencies
+ratatui = "0.28"
+crossterm = "0.28"

@@ -1,0 +1,26 @@
+[package]
+name = "rad-daemon"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "Headless player daemon for the radm radio player"
+keywords = ["radio", "daemon", "audio", "player"]
+categories = ["multimedia::audio"]
+
+[[bin]]
+name = "_rad-daemon"
+path = "src/main.rs"
+
+[dependencies]
+# Workspace dependencies
+rad-core = { path = "../rad-core" }
+tokio = { workspace = true }
+anyhow = { workspace = true }
+serde_json = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+tracing-appender = { workspace = true }
