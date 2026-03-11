@@ -25,7 +25,7 @@ use rad_core::{
 const DAEMON_SOCKET: &str = ".radm-player.sock";
 const IDLE_TIMEOUT_SECS: u64 = 30 * 60; // 30 minutes
 
-#[tokio::main]
+#[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<()> {
     // Initialize logging
     let data_dir = get_data_dir()?;
@@ -82,45 +82,55 @@ async fn main() -> Result<()> {
     let is_playing = Arc::new(AtomicBool::new(false));
     let is_playing_idle = is_playing.clone();
 
-    // Spawn idle timeout monitor task.
-    // The countdown only advances while the daemon is not playing — if music
-    // is playing the timer is reset so the daemon stays alive indefinitely.
-    tokio::spawn(async move {
-        loop {
-            tokio::time::sleep(Duration::from_secs(60)).await;
+    // Run everything in a LocalSet so non-Send types (AudioPlayer) can be shared
+    // across tasks without requiring Send. All tasks execute cooperatively on the
+    // single current_thread runtime — no cross-thread movement ever occurs.
+    let local = tokio::task::LocalSet::new();
+    local.run_until(async move {
+        // Spawn idle timeout monitor task.
+        // The countdown only advances while the daemon is not playing — if music
+        // is playing the timer is reset so the daemon stays alive indefinitely.
+        tokio::task::spawn_local(async move {
+            loop {
+                tokio::time::sleep(Duration::from_secs(60)).await;
 
-            if is_playing_idle.load(Ordering::Relaxed) {
-                *last_activity_check.lock().await = Instant::now();
-                continue;
-            }
+                if is_playing_idle.load(Ordering::Relaxed) {
+                    *last_activity_check.lock().await = Instant::now();
+                    continue;
+                }
 
-            let elapsed = last_activity_check.lock().await.elapsed();
-            if elapsed > Duration::from_secs(IDLE_TIMEOUT_SECS) {
-                info!("Daemon idle for {} seconds, shutting down", elapsed.as_secs());
-                std::process::exit(0);
-            }
-        }
-    });
-
-    // Main accept loop
-    loop {
-        match listener.accept().await {
-            Ok((stream, _)) => {
-                info!("New client connected");
-                let player_ref = player.clone();
-                let last_activity_ref = last_activity.clone();
-                let is_playing_ref = is_playing.clone();
-
-                // Process this client synchronously within an async context
-                if let Err(e) = handle_client(stream, player_ref, last_activity_ref, is_playing_ref).await {
-                    error!("Client handler error: {}", e);
+                let elapsed = last_activity_check.lock().await.elapsed();
+                if elapsed > Duration::from_secs(IDLE_TIMEOUT_SECS) {
+                    info!("Daemon idle for {} seconds, shutting down", elapsed.as_secs());
+                    std::process::exit(0);
                 }
             }
-            Err(e) => {
-                error!("Accept error: {}", e);
+        });
+
+        // Main accept loop — each client gets its own task so connections are
+        // handled concurrently; no client blocks another from being accepted.
+        loop {
+            match listener.accept().await {
+                Ok((stream, _)) => {
+                    info!("New client connected");
+                    let player_ref = player.clone();
+                    let last_activity_ref = last_activity.clone();
+                    let is_playing_ref = is_playing.clone();
+
+                    tokio::task::spawn_local(async move {
+                        if let Err(e) = handle_client(stream, player_ref, last_activity_ref, is_playing_ref).await {
+                            error!("Client handler error: {}", e);
+                        }
+                    });
+                }
+                Err(e) => {
+                    error!("Accept error: {}", e);
+                }
             }
         }
-    }
+    }).await;
+
+    Ok(())
 }
 
 async fn handle_client(

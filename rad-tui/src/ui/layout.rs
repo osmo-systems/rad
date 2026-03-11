@@ -156,15 +156,16 @@ fn draw_radio_art(f: &mut Frame, app: &App, area: Rect, theme: &Theme) {
             // Nightly scene: stars flicker slowly, moon crescent on the right, no wave
             // animation_frame wraps at 48; dividing by 16 gives 3 slow phases (1.6s each)
             let star_phase = (app.animation_frame / 16) % 3;
-            let stars_top = ["*  .     *  .  *  ", ".  *    .  *      ", "*     .     *  .  "][star_phase];
-            let stars_bot = [".  *  .  *  .  *  ", "*  .  *  .  *  .  ", ".  .  *  .  .  *  "][star_phase];
+            let stars_top  = ["*  .     *  .  *  ", ".  *    .  *      ", "*     .     *  .  "][star_phase];
+            let stars_moon = [".  *   .   *   ",    "*   .  *   .   ",   ".   *  .  *    "][star_phase];
+            let stars_bot  = [".  *  .  *  .  *  ", "*  .  *  .  *  .  ", ".  .  *  .  .  *  "][star_phase];
             let logo_style = Style::default().fg(Color::Cyan);
             let night = Style::default().fg(Color::Blue);
             let moon = Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD);
             vec![
                 Line::from(Span::styled(stars_top, night)),
                 Line::from(vec![
-                    Span::styled(".  *   .   *   ", night),
+                    Span::styled(stars_moon, night),
                     Span::styled("☽", moon),
                     Span::styled(" ", night),
                 ]),

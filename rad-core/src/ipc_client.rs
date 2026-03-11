@@ -37,10 +37,35 @@ impl PlayerDaemonClient {
         // Try to connect to existing daemon
         if let Ok(stream) = UnixStream::connect(&self.socket_path).await {
             info!("Connected to existing player daemon");
-            return Ok(PlayerDaemonConnection::new(stream).await?);
+            let mut conn = PlayerDaemonConnection::new(stream).await?;
+
+            // Health-check: verify the daemon responds within 3 seconds.
+            // An old single-threaded daemon will accept the socket connection at
+            // the OS level but never read from it while another client is active,
+            // so the health check times out and we kill + restart it.
+            match tokio::time::timeout(
+                std::time::Duration::from_secs(3),
+                conn.get_status(),
+            )
+            .await
+            {
+                Ok(Ok(_)) => {
+                    info!("Daemon health check passed");
+                    return Ok(conn);
+                }
+                Ok(Err(e)) => {
+                    info!("Daemon health check failed ({}), restarting daemon", e);
+                }
+                Err(_) => {
+                    info!("Daemon health check timed out, restarting daemon");
+                }
+            }
+
+            // Daemon is unresponsive — kill it and fall through to a fresh start
+            self.kill_daemon();
         }
 
-        // Daemon not running, try to start it
+        // Daemon not running (or was just killed), try to start it
         info!("Player daemon not running, attempting to start it...");
 
         // Remove stale socket file if it exists
@@ -70,6 +95,21 @@ impl PlayerDaemonClient {
         }
 
         Err(anyhow::anyhow!("Failed to connect to daemon"))
+    }
+
+    /// Kill the running daemon process and remove its socket.
+    fn kill_daemon(&self) {
+        info!("Killing unresponsive daemon");
+        // pkill matches on process name; -x requires an exact name match
+        let _ = std::process::Command::new("pkill")
+            .arg("-x")
+            .arg(DAEMON_BINARY)
+            .status();
+        if self.socket_path.exists() {
+            let _ = std::fs::remove_file(&self.socket_path);
+        }
+        // Give the OS a moment to reap the process and release the socket
+        std::thread::sleep(std::time::Duration::from_millis(300));
     }
 
     /// Start the daemon process
@@ -130,8 +170,17 @@ impl PlayerDaemonConnection {
         })
     }
 
-    /// Send a command and wait for response
+    /// Send a command and wait for response (5-second timeout)
     pub async fn send_command(&mut self, msg: ClientMessage) -> Result<DaemonMessage> {
+        tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            self.send_command_inner(msg),
+        )
+        .await
+        .map_err(|_| anyhow::anyhow!("Daemon request timed out"))?
+    }
+
+    async fn send_command_inner(&mut self, msg: ClientMessage) -> Result<DaemonMessage> {
         let json = serde_json::to_string(&msg)?;
 
         // Write command
