@@ -41,6 +41,14 @@ pub enum BrowseMode {
     ByLanguage,
 }
 
+/// Which focusable widget currently has keyboard focus on the main screen.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum FocusedWidget {
+    StationList,
+    StatusLog,
+    AutovoteList,
+}
+
 pub struct App {
     pub running: bool,
     pub current_tab: Tab,
@@ -92,8 +100,10 @@ pub struct App {
     // Confirm delete popup (favorites / autovote)
     pub confirm_delete: Option<ConfirmDelete>,
 
-    // Autovote section focus (within Favorites tab)
-    pub autovote_focused: bool,
+    // Which widget currently has keyboard focus
+    pub focused_widget: FocusedWidget,
+
+    // Autovote section selection (within Favorites tab)
     pub autovote_selected: usize,
     
     // Help popup
@@ -200,7 +210,7 @@ impl App {
             error_popup: None,
             warning_popup: None,
             confirm_delete: None,
-            autovote_focused: false,
+            focused_widget: FocusedWidget::StationList,
             autovote_selected: 0,
             help_popup: false,
             help_tab: HelpTab::Keys,
@@ -508,18 +518,45 @@ impl App {
         }
     }
 
+    /// Returns true if any popup is currently open (focus-stealing).
+    pub fn has_popup(&self) -> bool {
+        self.help_popup
+            || self.search_popup.is_some()
+            || self.error_popup.is_some()
+            || self.warning_popup.is_some()
+            || self.confirm_delete.is_some()
+    }
+
+    /// Cycle focus through focusable widgets on screen: station list → status log
+    /// → autovote list (Favorites tab only, when non-empty) → station list.
+    pub fn cycle_focus(&mut self) {
+        let has_autovote = self.current_tab == Tab::Favorites
+            && !self.autovote.get_all().is_empty();
+        self.focused_widget = match self.focused_widget {
+            FocusedWidget::StationList => FocusedWidget::StatusLog,
+            FocusedWidget::StatusLog => {
+                if has_autovote {
+                    FocusedWidget::AutovoteList
+                } else {
+                    FocusedWidget::StationList
+                }
+            }
+            FocusedWidget::AutovoteList => FocusedWidget::StationList,
+        };
+    }
+
     pub fn next_tab(&mut self) {
         // Cache browse stations before switching away
         if matches!(self.current_tab, Tab::Browse) {
             self.browse_stations = self.stations.clone();
         }
-        
+
         self.current_tab = match self.current_tab {
             Tab::Browse => Tab::Favorites,
             Tab::Favorites => Tab::History,
             Tab::History => Tab::Browse,
         };
-        self.autovote_focused = false;
+        self.focused_widget = FocusedWidget::StationList;
         self.autovote_selected = 0;
         self.reload_current_tab();
     }
@@ -535,7 +572,7 @@ impl App {
             Tab::Favorites => Tab::Browse,
             Tab::History => Tab::Favorites,
         };
-        self.autovote_focused = false;
+        self.focused_widget = FocusedWidget::StationList;
         self.autovote_selected = 0;
         self.reload_current_tab();
     }
@@ -826,7 +863,7 @@ impl App {
     }
 
     pub fn toggle_autovote(&mut self) {
-        let station = if self.autovote_focused {
+        let station = if self.focused_widget == FocusedWidget::AutovoteList {
             // Build a minimal Station from the autovote entry so we can re-use add/remove
             self.autovote.get_all().get(self.autovote_selected).map(|s| rad_core::Station {
                 station_uuid: s.uuid.clone(),
@@ -870,7 +907,7 @@ impl App {
                     if self.autovote_selected >= count && count > 0 {
                         self.autovote_selected = count - 1;
                     } else if count == 0 {
-                        self.autovote_focused = false;
+                        self.focused_widget = FocusedWidget::StationList;
                         self.autovote_selected = 0;
                     }
                 }

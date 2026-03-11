@@ -12,6 +12,9 @@ use crate::Theme;
 ///
 /// The title is any `Line<'static>` — use [`widget_title`] or [`crate::tabs::tab_line`]
 /// to build it, or pass `Line::from("My Panel")` for a plain string.
+///
+/// For a simple focusable widget with an optional digit shortcut, prefer
+/// [`focusable_block`] which builds both the title and the block in one call.
 pub fn panel_block(title: Line<'static>, focused: bool, theme: &Theme) -> Block<'static> {
     let border_style = if focused {
         theme.border_focused
@@ -33,6 +36,19 @@ pub fn popup_block(title: Line<'static>, theme: &Theme) -> Block<'static> {
         .borders(Borders::ALL)
         .border_style(theme.border_popup)
         .title(title)
+}
+
+/// Convenience wrapper: builds a [`widget_title`] and a [`panel_block`] in one call.
+///
+/// Use this for any widget that is focusable and optionally has a digit shortcut.
+/// The border color and the digit indicator always stay in sync.
+///
+/// ```ignore
+/// let block = focusable_block("Status Log", Some(2), focused, &theme);
+/// ```
+pub fn focusable_block(title: &str, shortcut: Option<u8>, focused: bool, theme: &Theme) -> Block<'static> {
+    let title_line = widget_title(title, shortcut, focused, theme);
+    panel_block(title_line, focused, theme)
 }
 
 /// Builds a widget title [`Line`] with an optional keyboard-shortcut digit indicator.

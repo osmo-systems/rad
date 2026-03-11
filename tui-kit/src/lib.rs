@@ -9,7 +9,7 @@
 //! | Module   | Contents |
 //! |----------|----------|
 //! | [`theme`] | [`Theme`] struct — the full color/style palette |
-//! | [`block`] | [`block::panel_block`], [`block::popup_block`], [`block::widget_title`] |
+//! | [`block`] | [`block::panel_block`], [`block::popup_block`], [`block::widget_title`], [`block::focusable_block`] |
 //! | [`tabs`]  | [`tabs::tab_line`] — horizontal tab-bar line for block titles |
 //! | [`popup`] | [`popup::centered_popup`] — centered overlay area + Clear |
 

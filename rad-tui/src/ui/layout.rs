@@ -7,14 +7,14 @@ use ratatui::{
 };
 
 use tui_kit::{
-    block::{panel_block, popup_block, widget_title},
+    block::{focusable_block, panel_block, popup_block, widget_title},
     popup::centered_popup,
     tabs::tab_line,
     toast::render_toasts,
     Theme,
 };
 
-use crate::app::{App, ConfirmDelete, HelpTab, Tab};
+use crate::app::{App, ConfirmDelete, FocusedWidget, HelpTab, Tab};
 use rad_core::PlayerState;
 
 pub fn draw(f: &mut Frame, app: &mut App) {
@@ -71,6 +71,13 @@ fn draw_main_content(f: &mut Frame, app: &mut App, area: Rect, theme: &Theme) {
         theme,
     );
 
+    // Always prepend [1]─ so the station list shows its focus shortcut
+    let station_focused = app.focused_widget == FocusedWidget::StationList && !app.has_popup();
+    let station_border_style = if station_focused { theme.border_focused } else { theme.border_unfocused };
+    let mut title_spans = vec![Span::styled("[1]\u{2500} ", station_border_style)];
+    title_spans.extend(tab_title.spans);
+    let station_title = Line::from(title_spans);
+
     if app.current_tab == Tab::Favorites && !app.autovote.get_all().is_empty() {
         let autovote_h = (app.autovote.get_all().len() as u16 + 2).min(12);
         let chunks = Layout::default()
@@ -78,18 +85,10 @@ fn draw_main_content(f: &mut Frame, app: &mut App, area: Rect, theme: &Theme) {
             .constraints([Constraint::Min(5), Constraint::Length(autovote_h)])
             .split(area);
 
-        // Prepend the [1] sub-list indicator to the tab title
-        let border_style = if !app.autovote_focused { theme.border_focused } else { theme.border_unfocused };
-        let mut spans = vec![
-            Span::styled("[1]\u{2500} ", border_style),
-        ];
-        spans.extend(tab_title.spans);
-        let fav_title = Line::from(spans);
-
-        draw_station_list(f, app, chunks[0], fav_title, theme);
+        draw_station_list(f, app, chunks[0], station_title, theme);
         draw_autovote_list(f, app, chunks[1], theme);
     } else {
-        draw_station_list(f, app, area, tab_title, theme);
+        draw_station_list(f, app, area, station_title, theme);
     }
 }
 
@@ -269,17 +268,10 @@ fn draw_station_list(f: &mut Frame, app: &mut App, area: Rect, title: Line, them
         }
     }
 
-    // Station list loses focus when any popup is open or autovote section is focused
-    let has_popup = app.help_popup
-        || app.search_popup.is_some()
-        || app.error_popup.is_some()
-        || app.warning_popup.is_some()
-        || app.confirm_delete.is_some()
-        || (app.current_tab == Tab::Favorites && app.autovote_focused);
-    let border_style = if has_popup {
-        theme.border_unfocused
-    } else {
+    let border_style = if app.focused_widget == FocusedWidget::StationList && !app.has_popup() {
         theme.border_focused
+    } else {
+        theme.border_unfocused
     };
 
     // Build title with station count
@@ -467,17 +459,18 @@ fn draw_player_and_log(f: &mut Frame, app: &App, area: Rect, theme: &Theme) {
 }
 
 fn draw_status_log(f: &mut Frame, app: &App, area: Rect, theme: &Theme) {
+    let focused = app.focused_widget == FocusedWidget::StatusLog && !app.has_popup();
+    let block = focusable_block("Status Log", Some(2), focused, theme);
+
     if app.status_log.is_empty() {
-        let title = widget_title("Status Log", None, false, theme);
         let paragraph = Paragraph::new("No status messages yet")
-            .block(panel_block(title, false, theme))
+            .block(block)
             .alignment(Alignment::Center)
             .style(Style::default().fg(Color::DarkGray));
         f.render_widget(paragraph, area);
         return;
     }
 
-    // Create list items from status log
     // Format is "[HH:MM:SS] message" — colour each part distinctly
     let list_items: Vec<ListItem> = app
         .status_log
@@ -503,12 +496,9 @@ fn draw_status_log(f: &mut Frame, app: &App, area: Rect, theme: &Theme) {
         })
         .collect();
 
-    let title = widget_title("Status Log", None, false, theme);
-    let list = List::new(list_items).block(panel_block(title, false, theme));
-
+    let list = List::new(list_items).block(block);
     let mut state = ListState::default();
     state.select(Some(app.status_log_scroll));
-
     f.render_stateful_widget(list, area, &mut state);
 }
 
@@ -688,8 +678,9 @@ fn draw_status_bar(f: &mut Frame, app: &App, area: Rect, theme: &Theme) {
             pairs.push(("+-", ":Vol"));
             pairs.push(("f", ":Fav"));
             pairs.push(("/", ":Search"));
-            pairs.push(("[]", ":Page"));
-            pairs.push(("Tab", ":Tabs"));
+            pairs.push(("np", ":Page"));
+            pairs.push(("[]", ":Tabs"));
+            pairs.push(("Tab", ":Focus"));
         }
         pairs.push(("?", ":Help"));
         pairs.push(("Ctrl+C", ":Quit"));
@@ -785,23 +776,8 @@ fn draw_warning_popup(f: &mut Frame, app: &App, theme: &Theme) {
 }
 
 fn draw_autovote_list(f: &mut Frame, app: &App, area: Rect, theme: &Theme) {
-    let has_popup = app.help_popup
-        || app.search_popup.is_some()
-        || app.error_popup.is_some()
-        || app.warning_popup.is_some()
-        || app.confirm_delete.is_some();
-
-    let border_style = if app.autovote_focused && !has_popup {
-        theme.border_focused
-    } else {
-        theme.border_unfocused
-    };
-
-    let title = widget_title("Autovote", Some(2), app.autovote_focused, theme);
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .title(title)
-        .border_style(border_style);
+    let focused = app.focused_widget == FocusedWidget::AutovoteList && !app.has_popup();
+    let block = focusable_block("Autovote", Some(3), focused, theme);
 
     let inner = block.inner(area);
     f.render_widget(block, area);
@@ -819,7 +795,7 @@ fn draw_autovote_list(f: &mut Frame, app: &App, area: Rect, theme: &Theme) {
         .iter()
         .enumerate()
         .map(|(i, s)| {
-            let is_selected = app.autovote_focused && i == app.autovote_selected;
+            let is_selected = app.focused_widget == FocusedWidget::AutovoteList && i == app.autovote_selected;
             let base_style = if is_selected { theme.selection } else { Style::default().fg(Color::White) };
 
             let (name_s, country_s, codec_s, bitrate_s) = if is_selected {
@@ -854,7 +830,7 @@ fn draw_autovote_list(f: &mut Frame, app: &App, area: Rect, theme: &Theme) {
 
     let list = List::new(list_items);
     let mut state = ListState::default();
-    if app.autovote_focused {
+    if app.focused_widget == FocusedWidget::AutovoteList {
         state.select(Some(app.autovote_selected));
     }
     f.render_stateful_widget(list, inner, &mut state);
@@ -936,16 +912,24 @@ fn draw_help_keys_content(f: &mut Frame, area: Rect) {
                 .add_modifier(Modifier::BOLD),
         )]),
         Line::from(vec![
-            Span::styled("  ↑/↓ or j/k  ", Style::default().fg(Color::Yellow)),
-            Span::raw("Navigate station list"),
+            Span::styled("  ↑/↓         ", Style::default().fg(Color::Yellow)),
+            Span::raw("Navigate focused widget (station list or log)"),
         ]),
         Line::from(vec![
-            Span::styled("  Tab / [ ]   ", Style::default().fg(Color::Yellow)),
-            Span::raw("Switch between tabs (Browse/Favorites/History)"),
+            Span::styled("  Tab         ", Style::default().fg(Color::Yellow)),
+            Span::raw("Cycle focus between widgets"),
         ]),
         Line::from(vec![
-            Span::styled("  1/2/3       ", Style::default().fg(Color::Yellow)),
-            Span::raw("Jump to Browse/Favorites/History tab"),
+            Span::styled("  [ / ]       ", Style::default().fg(Color::Yellow)),
+            Span::raw("Switch list tab (Browse/Favorites/History)"),
+        ]),
+        Line::from(vec![
+            Span::styled("  n / p       ", Style::default().fg(Color::Yellow)),
+            Span::raw("Next / previous page"),
+        ]),
+        Line::from(vec![
+            Span::styled("  1 / 2 / 3   ", Style::default().fg(Color::Yellow)),
+            Span::raw("Focus station list / log / autovote (Favorites)"),
         ]),
         Line::from(""),
         Line::from(vec![Span::styled(
