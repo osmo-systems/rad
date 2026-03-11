@@ -14,6 +14,10 @@ pub struct HistoryStation {
     pub url: String,
     pub country: String,
     pub tags: String,
+    #[serde(default)]
+    pub codec: String,
+    #[serde(default)]
+    pub bitrate: i32,
     pub last_played: DateTime<Utc>,
     pub play_count: u32,
 }
@@ -26,6 +30,8 @@ impl From<&Station> for HistoryStation {
             url: station.url_resolved.clone(),
             country: station.country.clone(),
             tags: station.tags.clone(),
+            codec: station.codec.clone(),
+            bitrate: station.bitrate,
             last_played: Utc::now(),
             play_count: 1,
         }

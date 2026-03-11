@@ -14,6 +14,10 @@ pub struct FavoriteStation {
     pub url: String,
     pub country: String,
     pub tags: String,
+    #[serde(default)]
+    pub codec: String,
+    #[serde(default)]
+    pub bitrate: i32,
     pub added_at: DateTime<Utc>,
 }
 
@@ -25,6 +29,8 @@ impl From<&Station> for FavoriteStation {
             url: station.url_resolved.clone(),
             country: station.country.clone(),
             tags: station.tags.clone(),
+            codec: station.codec.clone(),
+            bitrate: station.bitrate,
             added_at: Utc::now(),
         }
     }
@@ -48,8 +54,14 @@ impl FavoritesManager {
             debug!("Loading favorites from: {:?}", file_path);
             let contents = fs::read_to_string(&file_path)
                 .context("Failed to read favorites file")?;
-            toml::from_str(&contents)
-                .context("Failed to parse favorites file")?
+            match toml::from_str(&contents) {
+                Ok(data) => data,
+                Err(e) => {
+                    tracing::warn!("Corrupted favorites file, removing: {}", e);
+                    let _ = fs::remove_file(&file_path);
+                    FavoritesData { stations: Vec::new() }
+                }
+            }
         } else {
             info!("Creating new favorites file");
             FavoritesData {

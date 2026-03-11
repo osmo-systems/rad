@@ -14,7 +14,7 @@ use tokio::time::interval;
 use tracing::info;
 use tracing_subscriber;
 
-use crate::app::{App, HelpTab, Tab};
+use crate::app::{App, ConfirmDelete, HelpTab, Tab};
 use rad_core::{
     config::{cleanup_old_logs, get_data_dir, TOAST_DURATION_OPTIONS},
     search::{get_suggestions, parse_query},
@@ -114,9 +114,14 @@ async fn main() -> Result<()> {
 
     tracing::info!("Initial data loaded. Stations count: {}", app.stations.len());
 
-    // Auto-vote favorites at startup if configured
+    // Auto-vote favorites at startup if configured (legacy)
     if let Err(e) = app.auto_vote_favorites().await {
         tracing::warn!("Auto-vote for favorites failed: {}", e);
+    }
+
+    // Auto-vote dedicated autovote list at startup
+    if let Err(e) = app.auto_vote_autovote_list().await {
+        tracing::warn!("Auto-vote list failed: {}", e);
     }
 
     // Auto-play last station at startup if configured
@@ -378,6 +383,47 @@ async fn handle_key_event(
         return;
     }
 
+    // Handle confirm delete popup
+    if app.confirm_delete.is_some() {
+        match key {
+            KeyCode::Enter | KeyCode::Char('y') | KeyCode::Char('Y') => {
+                match app.confirm_delete.take() {
+                    Some(ConfirmDelete::Favorite(uuid, name)) => {
+                        if let Err(e) = app.favorites.remove(&uuid) {
+                            tracing::error!("Failed to remove favorite: {}", e);
+                        } else {
+                            app.show_toast(format!("Removed {} from favorites", name), tui_kit::ToastLevel::Warning);
+                            app.reload_current_tab();
+                            if app.selected_index > 0 && app.selected_index >= app.stations.len() {
+                                app.selected_index = app.stations.len().saturating_sub(1);
+                            }
+                        }
+                    }
+                    Some(ConfirmDelete::Autovote(uuid, name)) => {
+                        if let Err(e) = app.autovote.remove(&uuid) {
+                            tracing::error!("Failed to remove from autovote: {}", e);
+                        } else {
+                            app.show_toast(format!("Removed {} from autovote", name), tui_kit::ToastLevel::Warning);
+                            let count = app.autovote.get_all().len();
+                            if count == 0 {
+                                app.autovote_focused = false;
+                                app.autovote_selected = 0;
+                            } else if app.autovote_selected >= count {
+                                app.autovote_selected = count - 1;
+                            }
+                        }
+                    }
+                    None => {}
+                }
+            }
+            KeyCode::Esc | KeyCode::Char('n') | KeyCode::Char('N') => {
+                app.confirm_delete = None;
+            }
+            _ => {}
+        }
+        return;
+    }
+
     // Handle search popup
     if app.search_popup.is_some() {
         match key {
@@ -461,8 +507,36 @@ async fn handle_key_event(
             app.settings_selected = 0;
         }
         KeyCode::Char('q') | KeyCode::Char('Q') => app.quit(),
-        KeyCode::Up => app.select_prev(),
-        KeyCode::Down => app.select_next(),
+        KeyCode::Up => {
+            if app.current_tab == Tab::Favorites && app.autovote_focused {
+                if app.autovote_selected == 0 {
+                    app.autovote_focused = false;
+                } else {
+                    app.autovote_selected -= 1;
+                }
+            } else {
+                app.select_prev();
+            }
+        }
+        KeyCode::Down => {
+            if app.current_tab == Tab::Favorites && !app.autovote_focused {
+                let at_last = app.stations.is_empty()
+                    || app.selected_index + 1 >= app.stations.len();
+                if at_last && !app.autovote.get_all().is_empty() {
+                    app.autovote_focused = true;
+                    app.autovote_selected = 0;
+                } else {
+                    app.select_next();
+                }
+            } else if app.current_tab == Tab::Favorites && app.autovote_focused {
+                let count = app.autovote.get_all().len();
+                if app.autovote_selected + 1 < count {
+                    app.autovote_selected += 1;
+                }
+            } else {
+                app.select_next();
+            }
+        }
         KeyCode::PageUp => {
             // Scroll up within the current list by one page length
             app.page_up();
@@ -533,9 +607,23 @@ async fn handle_key_event(
                 }
             }
         }
-        KeyCode::Char('v') | KeyCode::Char('V') => {
+        KeyCode::Char('v') => {
             if let Err(e) = app.vote_for_selected().await {
                 tracing::error!("Failed to vote: {}", e);
+            }
+        }
+        KeyCode::Char('V') => {
+            app.toggle_autovote();
+        }
+        KeyCode::Char('d') | KeyCode::Char('D') => {
+            if app.current_tab == Tab::Favorites {
+                if app.autovote_focused {
+                    if let Some(s) = app.autovote.get_all().get(app.autovote_selected) {
+                        app.confirm_delete = Some(ConfirmDelete::Autovote(s.uuid.clone(), s.name.clone()));
+                    }
+                } else if let Some(s) = app.get_selected_station() {
+                    app.confirm_delete = Some(ConfirmDelete::Favorite(s.station_uuid.clone(), s.name.clone()));
+                }
             }
         }
         KeyCode::Char('/') => app.open_search_popup(),

@@ -6,7 +6,7 @@ use rad_core::{
     RadioBrowserClient, Station, Config, PlayerInfo,
     StartupTab,
     search::{AutocompleteData, SearchQuery, format_query, is_default_query},
-    storage::{CacheManager, FavoritesManager, HistoryManager, SearchHistoryManager, VoteManager},
+    storage::{AutovoteManager, CacheManager, FavoritesManager, HistoryManager, SearchHistoryManager, VoteManager},
     PlayerState, PlayerDaemonConnection,
 };
 use crate::ui::SearchPopup;
@@ -23,6 +23,13 @@ pub enum Tab {
 pub enum HelpTab {
     Keys,
     Settings,
+}
+
+/// Target of a pending deletion confirmation.
+#[derive(Debug, Clone)]
+pub enum ConfirmDelete {
+    Favorite(String, String), // uuid, name
+    Autovote(String, String), // uuid, name
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -63,6 +70,7 @@ pub struct App {
     pub api_client: RadioBrowserClient,
     pub favorites: FavoritesManager,
     pub history: HistoryManager,
+    pub autovote: AutovoteManager,
     pub cache: CacheManager,
     pub search_history: SearchHistoryManager,
     pub vote_manager: VoteManager,
@@ -77,9 +85,16 @@ pub struct App {
     
     // Error popup
     pub error_popup: Option<String>,
-    
+
     // Warning popup
     pub warning_popup: Option<String>,
+
+    // Confirm delete popup (favorites / autovote)
+    pub confirm_delete: Option<ConfirmDelete>,
+
+    // Autovote section focus (within Favorites tab)
+    pub autovote_focused: bool,
+    pub autovote_selected: usize,
     
     // Help popup
     pub help_popup: bool,
@@ -116,6 +131,7 @@ impl App {
         let config = Config::load(&data_dir)?;
         let favorites = FavoritesManager::new(&data_dir)?;
         let history = HistoryManager::new(&data_dir, config.max_history_entries)?;
+        let autovote = AutovoteManager::new(&data_dir)?;
         let cache = CacheManager::new(&data_dir, config.cache_duration_secs)?;
         let search_history = SearchHistoryManager::new(&data_dir)?;
         let vote_manager = VoteManager::new(&data_dir)?;
@@ -169,6 +185,7 @@ impl App {
             api_client,
             favorites,
             history,
+            autovote,
             cache,
             search_history,
             vote_manager,
@@ -182,6 +199,9 @@ impl App {
             
             error_popup: None,
             warning_popup: None,
+            confirm_delete: None,
+            autovote_focused: false,
+            autovote_selected: 0,
             help_popup: false,
             help_tab: HelpTab::Keys,
             settings_selected: 0,
@@ -499,6 +519,8 @@ impl App {
             Tab::Favorites => Tab::History,
             Tab::History => Tab::Browse,
         };
+        self.autovote_focused = false;
+        self.autovote_selected = 0;
         self.reload_current_tab();
     }
 
@@ -507,12 +529,14 @@ impl App {
         if matches!(self.current_tab, Tab::Browse) {
             self.browse_stations = self.stations.clone();
         }
-        
+
         self.current_tab = match self.current_tab {
             Tab::Browse => Tab::History,
             Tab::Favorites => Tab::Browse,
             Tab::History => Tab::Favorites,
         };
+        self.autovote_focused = false;
+        self.autovote_selected = 0;
         self.reload_current_tab();
     }
 
@@ -801,6 +825,90 @@ impl App {
         Ok(())
     }
 
+    pub fn toggle_autovote(&mut self) {
+        let station = if self.autovote_focused {
+            // Build a minimal Station from the autovote entry so we can re-use add/remove
+            self.autovote.get_all().get(self.autovote_selected).map(|s| rad_core::Station {
+                station_uuid: s.uuid.clone(),
+                change_uuid: String::new(),
+                name: s.name.clone(),
+                url: s.url.clone(),
+                url_resolved: s.url.clone(),
+                homepage: String::new(),
+                favicon: String::new(),
+                tags: String::new(),
+                country: s.country.clone(),
+                country_code: String::new(),
+                state: String::new(),
+                language: String::new(),
+                language_codes: String::new(),
+                votes: 0,
+                codec: s.codec.clone(),
+                bitrate: s.bitrate,
+                hls: 0,
+                last_check_ok: 1,
+                last_check_time: String::new(),
+                last_check_ok_time: String::new(),
+                click_timestamp: String::new(),
+                click_count: 0,
+                click_trend: 0,
+            })
+        } else {
+            self.get_selected_station().cloned()
+        };
+
+        if let Some(s) = station {
+            let uuid = s.station_uuid.clone();
+            let name = s.name.clone();
+            if self.autovote.contains(&uuid) {
+                if let Err(e) = self.autovote.remove(&uuid) {
+                    tracing::error!("Failed to remove from autovote: {}", e);
+                } else {
+                    self.show_toast(format!("Removed {} from autovote", name), ToastLevel::Warning);
+                    // Keep selection in bounds
+                    let count = self.autovote.get_all().len();
+                    if self.autovote_selected >= count && count > 0 {
+                        self.autovote_selected = count - 1;
+                    } else if count == 0 {
+                        self.autovote_focused = false;
+                        self.autovote_selected = 0;
+                    }
+                }
+            } else {
+                if let Err(e) = self.autovote.add(&s) {
+                    tracing::error!("Failed to add to autovote: {}", e);
+                } else {
+                    self.show_toast(format!("Added {} to autovote", name), ToastLevel::Success);
+                }
+            }
+        }
+    }
+
+    /// Vote for all stations in the autovote list that haven't been voted for in the last 24h.
+    pub async fn auto_vote_autovote_list(&mut self) -> Result<()> {
+        let _ = self.vote_manager.cleanup_expired();
+
+        let entries: Vec<(String, String)> = self.autovote.get_all()
+            .iter()
+            .map(|s| (s.uuid.clone(), s.name.clone()))
+            .collect();
+
+        for (uuid, name) in entries {
+            if !self.vote_manager.has_voted_recently(&uuid) {
+                match self.api_client.vote_for_station(&uuid).await {
+                    Ok(_) => {
+                        let _ = self.vote_manager.record_vote(&uuid);
+                        self.add_log(format!("Auto-voted for: {}", name));
+                    }
+                    Err(e) => {
+                        tracing::warn!("Auto-vote failed for {}: {}", name, e);
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
     pub fn set_browse_mode(&mut self, mode: BrowseMode) {
         self.browse_mode = mode;
         self.browse_list_mode = matches!(mode, BrowseMode::ByCountry | BrowseMode::ByGenre | BrowseMode::ByLanguage);
@@ -999,8 +1107,8 @@ impl App {
                         language: String::new(),
                         language_codes: String::new(),
                         votes: 0,
-                        codec: String::new(),
-                        bitrate: 0,
+                        codec: f.codec.clone(),
+                        bitrate: f.bitrate,
                         hls: 0,
                         last_check_ok: 1,
                         last_check_time: String::new(),
@@ -1030,8 +1138,8 @@ impl App {
                         language: String::new(),
                         language_codes: String::new(),
                         votes: 0,
-                        codec: String::new(),
-                        bitrate: 0,
+                        codec: h.codec.clone(),
+                        bitrate: h.bitrate,
                         hls: 0,
                         last_check_ok: 1,
                         last_check_time: String::new(),

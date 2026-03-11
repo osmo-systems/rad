@@ -14,7 +14,7 @@ use tui_kit::{
     Theme,
 };
 
-use crate::app::{App, HelpTab, Tab};
+use crate::app::{App, ConfirmDelete, HelpTab, Tab};
 use rad_core::PlayerState;
 
 pub fn draw(f: &mut Frame, app: &mut App) {
@@ -52,6 +52,11 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         draw_warning_popup(f, app, &theme);
     }
 
+    // Draw confirm delete popup
+    if app.confirm_delete.is_some() {
+        draw_confirm_delete_popup(f, app, &theme);
+    }
+
     // Draw toast notifications (top-right, non-interactable)
     render_toasts(f, &app.toasts, &theme);
 }
@@ -65,7 +70,18 @@ fn draw_main_content(f: &mut Frame, app: &mut App, area: Rect, theme: &Theme) {
         ],
         theme,
     );
-    draw_station_list(f, app, area, tab_title, theme);
+
+    if app.current_tab == Tab::Favorites && !app.autovote.get_all().is_empty() {
+        let autovote_h = (app.autovote.get_all().len() as u16 + 2).min(12);
+        let chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Min(5), Constraint::Length(autovote_h)])
+            .split(area);
+        draw_station_list(f, app, chunks[0], tab_title, theme);
+        draw_autovote_list(f, app, chunks[1], theme);
+    } else {
+        draw_station_list(f, app, area, tab_title, theme);
+    }
 }
 
 fn draw_radio_art(f: &mut Frame, app: &App, area: Rect, theme: &Theme) {
@@ -241,11 +257,13 @@ fn draw_station_list(f: &mut Frame, app: &mut App, area: Rect, title: Line, them
         app.pending_search = true;
     }
 
-    // Station list loses focus when any popup is open
+    // Station list loses focus when any popup is open or autovote section is focused
     let has_popup = app.help_popup
         || app.search_popup.is_some()
         || app.error_popup.is_some()
-        || app.warning_popup.is_some();
+        || app.warning_popup.is_some()
+        || app.confirm_delete.is_some()
+        || (app.current_tab == Tab::Favorites && app.autovote_focused);
     let border_style = if has_popup {
         theme.border_unfocused
     } else {
@@ -371,11 +389,10 @@ fn draw_station_list(f: &mut Frame, app: &mut App, area: Rect, title: Line, them
                 spans.push(Span::styled(status_marker, marker_style));
 
                 // Per-field colors when not selected; uniform base_style when selected
-                let (sep, name, country, codec, bitrate) = if is_selected {
-                    (base_style, base_style, base_style, base_style, base_style)
+                let (name, country, codec, bitrate) = if is_selected {
+                    (base_style, base_style, base_style, base_style)
                 } else {
                     (
-                        Style::default().fg(Color::DarkGray),
                         base_style,
                         Style::default().fg(Color::Cyan),
                         Style::default().fg(Color::Indexed(4)),
@@ -753,6 +770,120 @@ fn draw_warning_popup(f: &mut Frame, app: &App, theme: &Theme) {
 
         f.render_widget(paragraph, popup_area);
     }
+}
+
+fn draw_autovote_list(f: &mut Frame, app: &App, area: Rect, theme: &Theme) {
+    let has_popup = app.help_popup
+        || app.search_popup.is_some()
+        || app.error_popup.is_some()
+        || app.warning_popup.is_some()
+        || app.confirm_delete.is_some();
+
+    let border_style = if app.autovote_focused && !has_popup {
+        theme.border_focused
+    } else {
+        theme.border_unfocused
+    };
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title(Span::styled(" Autovote ", border_style))
+        .border_style(border_style);
+
+    let inner = block.inner(area);
+    f.render_widget(block, area);
+
+    let stations = app.autovote.get_all();
+    if stations.is_empty() {
+        return;
+    }
+
+    const NAME_W: usize = 32;
+    const COUNTRY_W: usize = 14;
+    const CODEC_W: usize = 6;
+
+    let list_items: Vec<ListItem> = stations
+        .iter()
+        .enumerate()
+        .map(|(i, s)| {
+            let is_selected = app.autovote_focused && i == app.autovote_selected;
+            let base_style = if is_selected { theme.selection } else { Style::default().fg(Color::White) };
+
+            let (name_s, country_s, codec_s, bitrate_s) = if is_selected {
+                (base_style, base_style, base_style, base_style)
+            } else {
+                (
+                    base_style,
+                    Style::default().fg(Color::Cyan),
+                    Style::default().fg(Color::Indexed(4)),
+                    Style::default().fg(Color::Magenta),
+                )
+            };
+
+            let name_col    = format!("{:<width$}", s.name.chars().take(NAME_W).collect::<String>(), width = NAME_W);
+            let country_col = format!("{:<width$}", s.country.chars().take(COUNTRY_W).collect::<String>(), width = COUNTRY_W);
+            let codec_col   = format!("{:<width$}", if s.codec.is_empty() { "—".to_string() } else { s.codec.clone() }, width = CODEC_W);
+            let bitrate_str = if s.bitrate > 0 { format!("{} kbps", s.bitrate) } else { "—".to_string() };
+
+            let line = Line::from(vec![
+                Span::styled(" ", base_style),
+                Span::styled(name_col, name_s),
+                Span::styled("  ", base_style),
+                Span::styled(country_col, country_s),
+                Span::styled("  ", base_style),
+                Span::styled(codec_col, codec_s),
+                Span::styled("  ", base_style),
+                Span::styled(bitrate_str, bitrate_s),
+            ]);
+            ListItem::new(line)
+        })
+        .collect();
+
+    let list = List::new(list_items);
+    let mut state = ListState::default();
+    if app.autovote_focused {
+        state.select(Some(app.autovote_selected));
+    }
+    f.render_stateful_widget(list, inner, &mut state);
+}
+
+fn draw_confirm_delete_popup(f: &mut Frame, app: &App, theme: &Theme) {
+    let Some(ref target) = app.confirm_delete else { return };
+
+    let (kind, name) = match target {
+        ConfirmDelete::Favorite(_, name) => ("Favorites", name.as_str()),
+        ConfirmDelete::Autovote(_, name) => ("Autovote", name.as_str()),
+    };
+
+    let popup_area = centered_popup(f, 0.5, 60, 7);
+
+    let text = vec![
+        Line::from(""),
+        Line::from(vec![
+            Span::raw("Remove "),
+            Span::styled(name, Style::default().fg(Color::Cyan)),
+            Span::raw(format!(" from {}?", kind)),
+        ]),
+        Line::from(""),
+        Line::from(vec![
+            Span::styled("  Enter", Style::default().fg(Color::Yellow)),
+            Span::raw(" Yes    "),
+            Span::styled("Esc", Style::default().fg(Color::Yellow)),
+            Span::raw(" Cancel"),
+        ]),
+    ];
+
+    let paragraph = Paragraph::new(text)
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_style(theme.border_warning)
+                .title(format!(" Remove from {} ", kind))
+                .title_style(theme.border_warning),
+        )
+        .alignment(Alignment::Center);
+
+    f.render_widget(paragraph, popup_area);
 }
 
 fn draw_help_popup(f: &mut Frame, app: &App, theme: &Theme) {
