@@ -10,6 +10,7 @@ use rad_core::{
     PlayerState, PlayerDaemonConnection,
 };
 use crate::ui::SearchPopup;
+use tui_kit::{Toast, ToastLevel};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Tab {
@@ -101,6 +102,9 @@ pub struct App {
     
     // UI state
     pub visible_stations_count: usize,
+
+    // Toast notifications
+    pub toasts: Vec<Toast>,
 }
 
 impl App {
@@ -189,16 +193,27 @@ impl App {
             browse_list_mode: false,
             
             animation_frame: 0,
-            
+
             status_log: Vec::new(),
             status_log_scroll: 0,
-            
+
             visible_stations_count: 10, // Default, will be updated by UI
+
+            toasts: Vec::new(),
         };
         
         Ok(app)
     }
     
+    pub fn show_toast(&mut self, message: String, level: ToastLevel) {
+        let duration_ms = self.config.toast_duration_secs * 1000;
+        self.toasts.push(Toast::new(message, level, duration_ms));
+    }
+
+    pub fn tick_toasts(&mut self) {
+        self.toasts.retain(|t| !t.is_expired());
+    }
+
     pub fn show_error(&mut self, message: String) {
         tracing::info!("show_error called with: {}", message);
         self.error_popup = Some(message);
@@ -698,13 +713,16 @@ impl App {
     pub async fn toggle_favorite(&mut self) -> Result<()> {
         if let Some(station) = self.get_selected_station() {
             let uuid = station.station_uuid.clone();
+            let name = station.name.clone();
             let station_clone = station.clone();
             if self.favorites.is_favorite(&uuid) {
                 self.favorites.remove(&uuid)?;
                 self.status_message = Some("Removed from favorites".to_string());
+                self.show_toast(format!("Removed {} from favorites", name), ToastLevel::Warning);
             } else {
                 self.favorites.add(&station_clone)?;
                 self.status_message = Some("Added to favorites".to_string());
+                self.show_toast(format!("Added {} to favorites", name), ToastLevel::Success);
             }
             
             // Reload if we're on favorites tab
@@ -716,31 +734,39 @@ impl App {
     }
 
     pub async fn vote_for_selected(&mut self) -> Result<()> {
-        if let Some(station) = self.get_selected_station() {
-            let uuid = station.station_uuid.clone();
-            let name = station.name.clone();
-
-            if self.vote_manager.has_voted_recently(&uuid) {
-                self.add_log(format!("Already voted for {} (24h cooldown)", name));
+        let (uuid, name) = match self.get_selected_station() {
+            Some(s) => (s.station_uuid.clone(), s.name.clone()),
+            None => {
+                self.add_log("Vote: no station selected".to_string());
                 return Ok(());
             }
+        };
 
-            // Record locally first so the UI highlights immediately
-            let _ = self.vote_manager.record_vote(&uuid);
+        if self.vote_manager.has_voted_recently(&uuid) {
+            self.add_log(format!("Already voted for {} (24h cooldown)", name));
+            self.show_toast(format!("Already voted for {}", name), ToastLevel::Warning);
+            return Ok(());
+        }
 
-            match self.api_client.vote_for_station(&uuid).await {
-                Ok(response) => {
-                    if response.ok {
-                        self.add_log(format!("Voted for: {}", name));
-                    } else {
-                        self.add_log(format!("Voted for: {} ({})", name, response.message));
-                    }
-                }
-                Err(e) => {
-                    self.add_log(format!("Vote recorded locally, API error: {}", e));
-                }
+        // Log immediately — the API call can take a moment
+        self.add_log(format!("Voting for {}...", name));
+        let _ = self.vote_manager.record_vote(&uuid);
+
+        match self.api_client.vote_for_station(&uuid).await {
+            Ok(response) if response.ok => {
+                self.add_log(format!("Vote cast for {}", name));
+                self.show_toast(format!("Voted for {}", name), ToastLevel::Success);
+            }
+            Ok(response) => {
+                self.add_log(format!("Vote rejected: {}", response.message));
+                self.show_toast(format!("Vote: {}", response.message), ToastLevel::Warning);
+            }
+            Err(e) => {
+                self.add_log(format!("Vote API error: {}", e));
+                self.show_toast("Vote saved locally (API error)".to_string(), ToastLevel::Warning);
             }
         }
+
         Ok(())
     }
 

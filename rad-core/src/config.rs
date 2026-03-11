@@ -121,6 +121,8 @@ pub struct Config {
     pub auto_vote_favorites: bool,
     #[serde(default = "default_true")]
     pub show_logo: bool,
+    #[serde(default = "default_toast_duration")]
+    pub toast_duration_secs: u64,
 
     // Session state
     #[serde(default)]
@@ -135,6 +137,12 @@ fn default_true() -> bool {
     true
 }
 
+fn default_toast_duration() -> u64 {
+    3
+}
+
+pub const TOAST_DURATION_OPTIONS: &[u64] = &[1, 2, 3, 5, 10];
+
 impl Default for Config {
     fn default() -> Self {
         Self {
@@ -147,6 +155,7 @@ impl Default for Config {
             play_at_startup: false,
             auto_vote_favorites: false,
             show_logo: true,
+            toast_duration_secs: 3,
             last_volume: None,
             last_station_name: None,
             last_station_url: None,

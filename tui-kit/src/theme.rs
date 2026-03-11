@@ -67,8 +67,8 @@ impl Default for Theme {
             tab_inactive: Style::default().fg(Color::White),
 
             selection: Style::default()
-                .fg(Color::White)
-                .bg(Color::Blue)
+                .fg(Color::Indexed(7))
+                .bg(Color::Indexed(6))
                 .add_modifier(Modifier::BOLD),
 
             shortcut_key:       Style::default().fg(Color::Yellow),

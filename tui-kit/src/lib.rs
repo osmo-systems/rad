@@ -17,5 +17,7 @@ pub mod block;
 pub mod popup;
 pub mod tabs;
 pub mod theme;
+pub mod toast;
 
 pub use theme::Theme;
+pub use toast::{Toast, ToastLevel, render_toasts};

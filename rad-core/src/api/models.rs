@@ -63,13 +63,13 @@ impl Station {
         if self.bitrate > 0 {
             format!("{} kbps", self.bitrate)
         } else {
-            "Unknown".to_string()
+            "—".to_string()
         }
     }
 
     pub fn format_codec(&self) -> String {
         if self.codec.is_empty() {
-            "Unknown".to_string()
+            "—".to_string()
         } else {
             self.codec.clone()
         }

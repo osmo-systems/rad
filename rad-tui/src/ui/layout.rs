@@ -10,6 +10,7 @@ use tui_kit::{
     block::{panel_block, popup_block, widget_title},
     popup::centered_popup,
     tabs::tab_line,
+    toast::render_toasts,
     Theme,
 };
 
@@ -50,6 +51,9 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     if app.warning_popup.is_some() {
         draw_warning_popup(f, app, &theme);
     }
+
+    // Draw toast notifications (top-right, non-interactable)
+    render_toasts(f, &app.toasts, &theme);
 }
 
 fn draw_main_content(f: &mut Frame, app: &mut App, area: Rect, theme: &Theme) {
@@ -353,15 +357,40 @@ fn draw_station_list(f: &mut Frame, app: &mut App, area: Rect, title: Line, them
                 } else {
                     spans.push(Span::styled("  ", base_style));
                 }
-                spans.push(Span::styled(status_marker, base_style));
-                let content_text = format!(
-                    " {} - {} - {} - {}",
-                    station.name,
-                    station.country,
-                    station.format_codec(),
-                    station.format_bitrate()
-                );
-                spans.push(Span::styled(content_text, base_style));
+
+                // Status marker: colored by online state when not selected
+                let marker_style = if is_selected {
+                    base_style
+                } else {
+                    match status_marker {
+                        "▶" => Style::default().fg(Color::Green),
+                        "●" => Style::default().fg(Color::Green),
+                        _ => Style::default().fg(Color::DarkGray),
+                    }
+                };
+                spans.push(Span::styled(status_marker, marker_style));
+
+                // Per-field colors when not selected; uniform base_style when selected
+                let (sep, name, country, codec, bitrate) = if is_selected {
+                    (base_style, base_style, base_style, base_style, base_style)
+                } else {
+                    (
+                        Style::default().fg(Color::DarkGray),
+                        base_style,
+                        Style::default().fg(Color::Cyan),
+                        Style::default().fg(Color::Indexed(4)),
+                        Style::default().fg(Color::Magenta),
+                    )
+                };
+
+                spans.push(Span::styled(" ", sep));
+                spans.push(Span::styled(station.name.clone(), name));
+                spans.push(Span::styled(" - ", sep));
+                spans.push(Span::styled(station.country.clone(), country));
+                spans.push(Span::styled(" - ", sep));
+                spans.push(Span::styled(station.format_codec(), codec));
+                spans.push(Span::styled(" - ", sep));
+                spans.push(Span::styled(station.format_bitrate(), bitrate));
 
                 ListItem::new(Line::from(spans))
             })
@@ -409,10 +438,29 @@ fn draw_status_log(f: &mut Frame, app: &App, area: Rect, theme: &Theme) {
     }
 
     // Create list items from status log
+    // Format is "[HH:MM:SS] message" — colour each part distinctly
     let list_items: Vec<ListItem> = app
         .status_log
         .iter()
-        .map(|msg| ListItem::new(msg.as_str()).style(Style::default().fg(Color::White)))
+        .map(|msg| {
+            let line = if msg.starts_with('[') {
+                if let Some(close) = msg.find(']') {
+                    let timestamp = &msg[1..close];
+                    let rest = &msg[close + 1..];
+                    Line::from(vec![
+                        Span::styled("[", Style::default().fg(Color::Indexed(2))),
+                        Span::styled(timestamp, Style::default().fg(Color::Indexed(6))),
+                        Span::styled("]", Style::default().fg(Color::Indexed(2))),
+                        Span::styled(rest, Style::default().fg(Color::White)),
+                    ])
+                } else {
+                    Line::from(Span::styled(msg.as_str(), Style::default().fg(Color::White)))
+                }
+            } else {
+                Line::from(Span::styled(msg.as_str(), Style::default().fg(Color::White)))
+            };
+            ListItem::new(line)
+        })
         .collect();
 
     let title = widget_title("Status Log", None, false, theme);
@@ -622,7 +670,7 @@ fn draw_status_bar(f: &mut Frame, app: &App, area: Rect, theme: &Theme) {
     // Version info on the right
     let version = env!("CARGO_PKG_VERSION");
     let version_line = Line::from(vec![
-        Span::styled("rad ", theme.hint),
+        Span::styled("rad ", theme.shortcut_key),
         Span::styled(version, theme.hint),
     ]);
     let version_widget = Paragraph::new(version_line).alignment(Alignment::Right);
@@ -811,6 +859,7 @@ fn draw_help_keys_content(f: &mut Frame, area: Rect) {
 fn draw_help_settings_content(f: &mut Frame, app: &App, area: Rect, theme: &Theme) {
     let label_width = 22usize;
 
+    let toast_duration_label = format!("{}s", app.config.toast_duration_secs);
     let settings: &[(&str, &str)] = &[
         ("Startup Tab", app.config.startup_tab.label()),
         (
@@ -837,6 +886,7 @@ fn draw_help_settings_content(f: &mut Frame, app: &App, area: Rect, theme: &Them
             "Show Logo",
             if app.config.show_logo { "On" } else { "Off" },
         ),
+        ("Toast Duration", &toast_duration_label),
     ];
 
     let mut lines = vec![Line::from("")];

@@ -97,8 +97,11 @@ impl SearchPopup {
             if value_start < token_end {
                 self.input.drain(value_start..token_end);
                 self.cursor_position = value_start;
+            } else {
+                // Cursor is right after '=' with no value — delete the '=' sign.
+                self.delete_char();
+                return;
             }
-            // If the value is already empty (cursor right after '='), no-op.
         } else {
             // Cursor is in a word with no '=' anywhere in the token.
             // Check whether the full token contains '=' (cursor might be in the key

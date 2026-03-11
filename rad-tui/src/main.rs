@@ -16,7 +16,7 @@ use tracing_subscriber;
 
 use crate::app::{App, HelpTab, Tab};
 use rad_core::{
-    config::{cleanup_old_logs, get_data_dir},
+    config::{cleanup_old_logs, get_data_dir, TOAST_DURATION_OPTIONS},
     search::{get_suggestions, parse_query},
     PlayerDaemonClient,
     RadioBrowserClient,
@@ -152,6 +152,9 @@ async fn main() -> Result<()> {
             }
         }
 
+        // Expire toasts
+        app.tick_toasts();
+
         // Update animation frame
         app.animation_frame = (app.animation_frame + 1) % 48;
 
@@ -187,26 +190,30 @@ async fn main() -> Result<()> {
             }
         }
 
-        // Handle events
-        tokio::select! {
-            _ = tick_interval.tick() => {
-                // Regular tick for animations
-            }
+        // Read the next event without doing any async work inside select!.
+        // handle_key_event is called OUTSIDE the select so long-running operations
+        // (e.g. network calls for voting) are never cancelled by the tick branch.
+        let pending_key = tokio::select! {
+            _ = tick_interval.tick() => None,
             _ = tokio::signal::ctrl_c() => {
-                // Handle Ctrl+C signal from OS
                 info!("Received Ctrl+C signal, shutting down...");
                 app.quit();
+                None
             }
-            _ = async {
+            key = async {
                 if event::poll(Duration::from_millis(50)).unwrap() {
                     if let Ok(Event::Key(key)) = event::read() {
-                        // Only handle key press events, not release
                         if key.kind == KeyEventKind::Press {
-                            handle_key_event(&mut app, &mut daemon_conn, key.code, key.modifiers).await;
+                            return Some((key.code, key.modifiers));
                         }
                     }
                 }
-            } => {}
+                None
+            } => key,
+        };
+
+        if let Some((code, modifiers)) = pending_key {
+            handle_key_event(&mut app, &mut daemon_conn, code, modifiers).await;
         }
 
         if !app.running {
@@ -267,7 +274,7 @@ async fn handle_key_event(
                     }
                 }
                 KeyCode::Down | KeyCode::Char('j') => {
-                    if app.settings_selected < 4 {
+                    if app.settings_selected < 5 {
                         app.settings_selected += 1;
                     }
                 }
@@ -294,6 +301,17 @@ async fn handle_key_event(
                             app.config.show_logo = !app.config.show_logo;
                             let _ = app.config.save(&app.data_dir);
                         }
+                        5 => {
+                            let cur = app.config.toast_duration_secs;
+                            let next = TOAST_DURATION_OPTIONS
+                                .iter()
+                                .skip_while(|&&v| v != cur)
+                                .nth(1)
+                                .copied()
+                                .unwrap_or(TOAST_DURATION_OPTIONS[0]);
+                            app.config.toast_duration_secs = next;
+                            let _ = app.config.save(&app.data_dir);
+                        }
                         _ => {}
                     }
                 }
@@ -318,6 +336,18 @@ async fn handle_key_event(
                         }
                         4 => {
                             app.config.show_logo = !app.config.show_logo;
+                            let _ = app.config.save(&app.data_dir);
+                        }
+                        5 => {
+                            let cur = app.config.toast_duration_secs;
+                            let prev = TOAST_DURATION_OPTIONS
+                                .iter()
+                                .rev()
+                                .skip_while(|&&v| v != cur)
+                                .nth(1)
+                                .copied()
+                                .unwrap_or(TOAST_DURATION_OPTIONS[TOAST_DURATION_OPTIONS.len() - 1]);
+                            app.config.toast_duration_secs = prev;
                             let _ = app.config.save(&app.data_dir);
                         }
                         _ => {}

@@ -244,7 +244,7 @@ impl RadioBrowserClient {
     // Vote for a station
     pub async fn vote_for_station(&mut self, station_uuid: &str) -> Result<VoteResponse> {
         let endpoint = format!("/json/vote/{}", station_uuid);
-        self.post(&endpoint).await
+        self.get(&endpoint).await
     }
 
     // Advanced search with multiple parameters
