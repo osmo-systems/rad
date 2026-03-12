@@ -141,7 +141,7 @@ fn default_toast_duration() -> u64 {
     3
 }
 
-pub const TOAST_DURATION_OPTIONS: &[u64] = &[1, 2, 3, 5, 10];
+pub const TOAST_DURATION_OPTIONS: &[u64] = &[0, 1, 2, 3, 5, 10];
 
 impl Default for Config {
     fn default() -> Self {

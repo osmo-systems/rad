@@ -2,7 +2,7 @@ use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::Style,
     text::{Line, Span},
-    widgets::{Block, Borders, Clear, List, ListItem, Paragraph},
+    widgets::{Block, Borders, Clear, List, ListItem, Padding, Paragraph},
     Frame,
 };
 use std::time::Instant;
@@ -243,20 +243,20 @@ impl SearchPopup {
 
     fn get_icon_for_field(&self, field_name: &str) -> &str {
         match field_name {
-            "name" => "📻 ",
-            "country" => "🌍 ",
-            "countrycode" => "🏴 ",
-            "state" => "📍 ",
-            "language" => "🗣️ ",
-            "tag" => "🏷️ ",
-            "codec" => "🎵 ",
-            "bitrate_min" | "bitrate_max" => "🔊 ",
-            "order" => "📊 ",
-            "reverse" => "🔄 ",
-            "hidebroken" => "🔧 ",
-            "is_https" => "🔒 ",
-            "page" => "📄 ",
-            _ => "🔍 ",
+            "name" => "> ",
+            "country" => "@ ",
+            "countrycode" => "# ",
+            "state" => ". ",
+            "language" => "~ ",
+            "tag" => "* ",
+            "codec" => "% ",
+            "bitrate_min" | "bitrate_max" => "= ",
+            "order" => "^ ",
+            "reverse" => "< ",
+            "hidebroken" => "! ",
+            "is_https" => "$ ",
+            "page" => "& ",
+            _ => "? ",
         }
     }
 
@@ -343,18 +343,18 @@ impl SearchPopup {
                 .borders(Borders::ALL)
                 .border_style(theme.border_popup)
                 .title("Search Stations")
-                .title_alignment(Alignment::Center),
+                .title_alignment(Alignment::Center)
+                .padding(Padding::horizontal(1)),
         );
 
         f.render_widget(input_paragraph, area);
 
-        // Render cursor
+        // Render cursor — offset by border (1) + horizontal padding (1) = 2
         if self.cursor_position <= self.input.len() {
-            // Calculate cursor position on screen
-            let cursor_x = area.x + 1 + self.cursor_position as u16;
+            let cursor_x = area.x + 2 + self.cursor_position as u16;
             let cursor_y = area.y + 1;
 
-            if cursor_x < area.x + area.width - 1 {
+            if cursor_x < area.x + area.width - 2 {
                 f.set_cursor_position((cursor_x, cursor_y));
             }
         }
@@ -399,7 +399,8 @@ impl SearchPopup {
             Block::default()
                 .borders(Borders::ALL)
                 .border_style(theme.border_popup)
-                .title(title),
+                .title(title)
+                .padding(Padding::horizontal(1)),
         );
 
         f.render_widget(list, area);

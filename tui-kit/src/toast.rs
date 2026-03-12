@@ -3,7 +3,6 @@ use std::time::Instant;
 use ratatui::{
     layout::Rect,
     style::{Color, Style},
-    text::{Line, Span},
     widgets::{Block, Borders, Clear, Paragraph, Wrap},
     Frame,
 };
@@ -77,10 +76,10 @@ pub fn render_toasts(f: &mut Frame, toasts: &[Toast], _theme: &Theme) {
             break;
         }
 
-        let (icon, level_label, normal_color) = match toast.level {
-            ToastLevel::Success => ("✓", "Success", Color::Green),
-            ToastLevel::Warning => ("!", "Warning", Color::Yellow),
-            ToastLevel::Error => ("✕", "Error", Color::Red),
+        let normal_color = match toast.level {
+            ToastLevel::Success => Color::Green,
+            ToastLevel::Warning => Color::Yellow,
+            ToastLevel::Error => Color::Red,
         };
         let color = if toast.is_fading() {
             Color::Indexed(8)
@@ -90,16 +89,9 @@ pub fn render_toasts(f: &mut Frame, toasts: &[Toast], _theme: &Theme) {
 
         let toast_area = Rect { x, y, width: TOAST_WIDTH, height: toast_height };
 
-        let title = Line::from(vec![
-            Span::raw(" "),
-            Span::styled(icon, Style::default().fg(color)),
-            Span::styled(format!(" {} ", level_label), Style::default().fg(color)),
-        ]);
-
         let block = Block::default()
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(color))
-            .title(title);
+            .border_style(Style::default().fg(color));
 
         let body = Paragraph::new(toast.message.as_str())
             .style(Style::default().fg(color))

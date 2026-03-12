@@ -14,10 +14,12 @@
 //! | [`popup`] | [`popup::centered_popup`] — centered overlay area + Clear |
 
 pub mod block;
+pub mod log;
 pub mod popup;
 pub mod tabs;
 pub mod theme;
 pub mod toast;
 
+pub use log::{LogEntry, LogLevel};
 pub use theme::Theme;
 pub use toast::{Toast, ToastLevel, render_toasts};

@@ -10,19 +10,21 @@ use rad_core::{
     PlayerState, PlayerDaemonConnection,
 };
 use crate::ui::SearchPopup;
-use tui_kit::{Toast, ToastLevel};
+use tui_kit::{LogEntry, LogLevel, Toast, ToastLevel};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Tab {
     Browse,
     Favorites,
     History,
+    Autovote,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum HelpTab {
     Keys,
     Settings,
+    Log,
 }
 
 /// Target of a pending deletion confirmation.
@@ -45,8 +47,6 @@ pub enum BrowseMode {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum FocusedWidget {
     StationList,
-    StatusLog,
-    AutovoteList,
 }
 
 pub struct App {
@@ -122,8 +122,8 @@ pub struct App {
     pub animation_frame: usize,
     
     // Status log
-    pub status_log: Vec<String>,
-    pub status_log_scroll: usize,
+    pub status_log: Vec<LogEntry>,
+    pub help_log_scroll: usize,
     
     // UI state
     pub visible_stations_count: usize,
@@ -225,7 +225,7 @@ impl App {
             animation_frame: 0,
 
             status_log: Vec::new(),
-            status_log_scroll: 0,
+            help_log_scroll: 0,
 
             visible_stations_count: 10, // Default, will be updated by UI
 
@@ -236,6 +236,9 @@ impl App {
     }
     
     pub fn show_toast(&mut self, message: String, level: ToastLevel) {
+        if self.config.toast_duration_secs == 0 {
+            return;
+        }
         let duration_ms = self.config.toast_duration_secs * 1000;
         self.toasts.push(Toast::new(message, level, duration_ms));
     }
@@ -338,7 +341,7 @@ impl App {
                 
                 let msg = format!("Found {} stations (is_last_page={})", self.stations.len(), self.is_last_page);
                 self.status_message = Some(msg.clone());
-                self.add_log(msg);
+                self.add_log(LogLevel::Info, msg);
                 
                 tracing::info!("execute_search: Log added");
                 
@@ -394,7 +397,7 @@ impl App {
             
             let msg = format!("Loaded page {} from cache ({} stations)", page, stations.len());
             self.status_message = Some(msg.clone());
-            self.add_log(msg);
+            self.add_log(LogLevel::Debug, msg);
             
             tracing::info!("load_page: Cache loaded, is_last_page={}", self.is_last_page);
             
@@ -443,7 +446,7 @@ impl App {
                 
                 let msg = format!("Loaded page {} ({} stations)", page, self.stations.len());
                 self.status_message = Some(msg.clone());
-                self.add_log(msg);
+                self.add_log(LogLevel::Info, msg);
                 
                 tracing::info!("load_page: Success, is_last_page={}, highest_page={}", self.is_last_page, self.highest_page_loaded);
                 
@@ -464,7 +467,7 @@ impl App {
             self.load_page(self.current_page + 1).await
         } else {
             tracing::info!("next_page: blocked because is_last_page=true");
-            self.add_log("Cannot go to next page: already on last page".to_string());
+            self.add_log(LogLevel::Warning, "Cannot go to next page: already on last page".to_string());
             Ok(())
         }
     }
@@ -489,33 +492,23 @@ impl App {
         self.running = false;
     }
     
-    pub fn add_log(&mut self, message: String) {
-        // Add timestamp to log message
-        let timestamp = chrono::Local::now().format("%H:%M:%S");
-        let log_entry = format!("[{}] {}", timestamp, message);
-        self.status_log.push(log_entry);
-        
-        // Keep only last 100 log entries
+    pub fn add_log(&mut self, level: LogLevel, message: String) {
+        // Evict entries older than 24 h
+        let cutoff = std::time::Duration::from_secs(24 * 3600);
+        self.status_log.retain(|e| e.created_at.elapsed() < cutoff);
+
+        let timestamp = chrono::Local::now().format("%H:%M:%S").to_string();
+        self.status_log.push(LogEntry {
+            timestamp,
+            level,
+            message,
+            created_at: std::time::Instant::now(),
+        });
         if self.status_log.len() > 100 {
             self.status_log.remove(0);
         }
-        
-        // Auto-scroll to bottom
-        if self.status_log.len() > 0 {
-            self.status_log_scroll = self.status_log.len().saturating_sub(1);
-        }
-    }
-    
-    pub fn scroll_log_up(&mut self) {
-        if self.status_log_scroll > 0 {
-            self.status_log_scroll -= 1;
-        }
-    }
-    
-    pub fn scroll_log_down(&mut self) {
-        if !self.status_log.is_empty() && self.status_log_scroll < self.status_log.len() - 1 {
-            self.status_log_scroll += 1;
-        }
+        // Auto-scroll to bottom in help log view
+        self.help_log_scroll = self.status_log.len().saturating_sub(1);
     }
 
     /// Returns true if any popup is currently open (focus-stealing).
@@ -527,34 +520,16 @@ impl App {
             || self.confirm_delete.is_some()
     }
 
-    /// Cycle focus through focusable widgets on screen: station list → status log
-    /// → autovote list (Favorites tab only, when non-empty) → station list.
-    pub fn cycle_focus(&mut self) {
-        let has_autovote = self.current_tab == Tab::Favorites
-            && !self.autovote.get_all().is_empty();
-        self.focused_widget = match self.focused_widget {
-            FocusedWidget::StationList => FocusedWidget::StatusLog,
-            FocusedWidget::StatusLog => {
-                if has_autovote {
-                    FocusedWidget::AutovoteList
-                } else {
-                    FocusedWidget::StationList
-                }
-            }
-            FocusedWidget::AutovoteList => FocusedWidget::StationList,
-        };
-    }
-
     pub fn next_tab(&mut self) {
-        // Cache browse stations before switching away
         if matches!(self.current_tab, Tab::Browse) {
             self.browse_stations = self.stations.clone();
         }
-
+        let has_autovote = self.config.auto_vote_favorites;
         self.current_tab = match self.current_tab {
             Tab::Browse => Tab::Favorites,
             Tab::Favorites => Tab::History,
-            Tab::History => Tab::Browse,
+            Tab::History => if has_autovote { Tab::Autovote } else { Tab::Browse },
+            Tab::Autovote => Tab::Browse,
         };
         self.focused_widget = FocusedWidget::StationList;
         self.autovote_selected = 0;
@@ -562,15 +537,15 @@ impl App {
     }
 
     pub fn prev_tab(&mut self) {
-        // Cache browse stations before switching away
         if matches!(self.current_tab, Tab::Browse) {
             self.browse_stations = self.stations.clone();
         }
-
+        let has_autovote = self.config.auto_vote_favorites;
         self.current_tab = match self.current_tab {
-            Tab::Browse => Tab::History,
+            Tab::Browse => if has_autovote { Tab::Autovote } else { Tab::History },
             Tab::Favorites => Tab::Browse,
             Tab::History => Tab::Favorites,
+            Tab::Autovote => Tab::History,
         };
         self.focused_widget = FocusedWidget::StationList;
         self.autovote_selected = 0;
@@ -672,7 +647,7 @@ impl App {
 
             // Send play command to daemon
             tracing::info!("Sending play command to daemon");
-            self.add_log(format!("Playing: {}", station.name));
+            self.add_log(LogLevel::Info, format!("Playing: {}", station.name));
             match daemon_conn.play(station.name.clone(), station.url_resolved.clone()).await {
                 Ok(_) => {
                     self.status_message = Some(format!("Playing: {}", station.name));
@@ -690,7 +665,7 @@ impl App {
                     tracing::error!("Failed to send play command: {}", e);
                     let msg = format!("Failed to send play command: {}", e);
                     self.status_message = Some(msg.clone());
-                    self.add_log(msg);
+                    self.add_log(LogLevel::Error, msg);
                     return Err(e);
                 }
             }
@@ -719,7 +694,7 @@ impl App {
                 self.player_info.station_name.clone(),
                 self.player_info.station_url.clone(),
             ).await?;
-            self.add_log(format!("Playing: {}", self.player_info.station_name));
+            self.add_log(LogLevel::Info, format!("Playing: {}", self.player_info.station_name));
             self.status_message = Some(format!("Playing: {}", self.player_info.station_name));
         } else {
             tracing::warn!("No restored station to play");
@@ -798,32 +773,32 @@ impl App {
         let (uuid, name) = match self.get_selected_station() {
             Some(s) => (s.station_uuid.clone(), s.name.clone()),
             None => {
-                self.add_log("Vote: no station selected".to_string());
+                self.add_log(LogLevel::Warning, "Vote: no station selected".to_string());
                 return Ok(());
             }
         };
 
         if self.vote_manager.has_voted_recently(&uuid) {
-            self.add_log(format!("Already voted for {} (24h cooldown)", name));
+            self.add_log(LogLevel::Warning, format!("Already voted for {} (24h cooldown)", name));
             self.show_toast(format!("Already voted for {}", name), ToastLevel::Warning);
             return Ok(());
         }
 
         // Log immediately — the API call can take a moment
-        self.add_log(format!("Voting for {}...", name));
+        self.add_log(LogLevel::Debug, format!("Voting for {}...", name));
         let _ = self.vote_manager.record_vote(&uuid);
 
         match self.api_client.vote_for_station(&uuid).await {
             Ok(response) if response.ok => {
-                self.add_log(format!("Vote cast for {}", name));
+                self.add_log(LogLevel::Info, format!("Vote cast for {}", name));
                 self.show_toast(format!("Voted for {}", name), ToastLevel::Success);
             }
             Ok(response) => {
-                self.add_log(format!("Vote rejected: {}", response.message));
+                self.add_log(LogLevel::Warning, format!("Vote rejected: {}", response.message));
                 self.show_toast(format!("Vote: {}", response.message), ToastLevel::Warning);
             }
             Err(e) => {
-                self.add_log(format!("Vote API error: {}", e));
+                self.add_log(LogLevel::Error, format!("Vote API error: {}", e));
                 self.show_toast("Vote saved locally (API error)".to_string(), ToastLevel::Warning);
             }
         }
@@ -851,7 +826,7 @@ impl App {
                 match self.api_client.vote_for_station(&uuid).await {
                     Ok(_) => {
                         let _ = self.vote_manager.record_vote(&uuid);
-                        self.add_log(format!("Auto-voted for favorite: {}", name));
+                        self.add_log(LogLevel::Info, format!("Auto-voted for favorite: {}", name));
                     }
                     Err(e) => {
                         tracing::warn!("Auto-vote failed for {}: {}", name, e);
@@ -863,7 +838,7 @@ impl App {
     }
 
     pub fn toggle_autovote(&mut self) {
-        let station = if self.focused_widget == FocusedWidget::AutovoteList {
+        let station = if self.current_tab == Tab::Autovote {
             // Build a minimal Station from the autovote entry so we can re-use add/remove
             self.autovote.get_all().get(self.autovote_selected).map(|s| rad_core::Station {
                 station_uuid: s.uuid.clone(),
@@ -902,13 +877,17 @@ impl App {
                     tracing::error!("Failed to remove from autovote: {}", e);
                 } else {
                     self.show_toast(format!("Removed {} from autovote", name), ToastLevel::Warning);
-                    // Keep selection in bounds
                     let count = self.autovote.get_all().len();
-                    if self.autovote_selected >= count && count > 0 {
-                        self.autovote_selected = count - 1;
-                    } else if count == 0 {
-                        self.focused_widget = FocusedWidget::StationList;
+                    if count == 0 && self.current_tab == Tab::Autovote {
+                        // Autovote tab is now empty — switch to Favorites
+                        if matches!(self.current_tab, Tab::Browse) {
+                            self.browse_stations = self.stations.clone();
+                        }
+                        self.current_tab = Tab::Favorites;
+                        self.reload_current_tab();
                         self.autovote_selected = 0;
+                    } else if self.autovote_selected >= count && count > 0 {
+                        self.autovote_selected = count - 1;
                     }
                 }
             } else {
@@ -935,7 +914,7 @@ impl App {
                 match self.api_client.vote_for_station(&uuid).await {
                     Ok(_) => {
                         let _ = self.vote_manager.record_vote(&uuid);
-                        self.add_log(format!("Auto-voted for: {}", name));
+                        self.add_log(LogLevel::Info, format!("Auto-voted for: {}", name));
                     }
                     Err(e) => {
                         tracing::warn!("Auto-vote failed for {}: {}", name, e);
@@ -1078,20 +1057,20 @@ impl App {
     pub async fn load_popular_stations(&mut self) -> Result<()> {
         self.loading = true;
         tracing::info!("Loading popular stations...");
-        self.add_log("Loading popular stations...".to_string());
+        self.add_log(LogLevel::Debug, "Loading popular stations...".to_string());
         
         let cache_key = "popular";
         let stations = if let Some(cached) = self.cache.get(cache_key) {
             tracing::info!("Using cached popular stations: {} stations", cached.len());
-            self.add_log(format!("Loaded {} stations from cache", cached.len()));
+            self.add_log(LogLevel::Debug, format!("Loaded {} stations from cache", cached.len()));
             cached
         } else {
             tracing::info!("Fetching popular stations from API...");
-            self.add_log("Fetching stations from API...".to_string());
+            self.add_log(LogLevel::Debug, "Fetching stations from API...".to_string());
             match self.api_client.get_popular_stations(self.config.station_limit).await {
                 Ok(stations) => {
                     tracing::info!("Fetched {} popular stations from API", stations.len());
-                    self.add_log(format!("Fetched {} stations from API", stations.len()));
+                    self.add_log(LogLevel::Info, format!("Fetched {} stations from API", stations.len()));
                     if let Err(e) = self.cache.set(cache_key, stations.clone()) {
                         tracing::warn!("Failed to cache stations: {}", e);
                     }
@@ -1102,7 +1081,7 @@ impl App {
                     self.loading = false;
                     let msg = format!("Failed to load stations: {}", e);
                     self.status_message = Some(msg.clone());
-                    self.add_log(msg);
+                    self.add_log(LogLevel::Error, msg);
                     return Err(e);
                 }
             }
@@ -1114,7 +1093,7 @@ impl App {
         self.loading = false;
         let msg = format!("Loaded {} popular stations", self.stations.len());
         self.status_message = Some(msg.clone());
-        self.add_log(msg);
+        self.add_log(LogLevel::Info, msg);
         tracing::info!("Popular stations loaded successfully: {} stations", self.stations.len());
         
         Ok(())
@@ -1122,6 +1101,11 @@ impl App {
 
     pub fn reload_current_tab(&mut self) {
         match self.current_tab {
+            Tab::Autovote => {
+                // Autovote tab renders directly from autovote manager — no station list needed
+                self.stations = Vec::new();
+                self.selected_index = 0;
+            }
             Tab::Browse => {
                 // Restore cached browse stations
                 self.stations = self.browse_stations.clone();

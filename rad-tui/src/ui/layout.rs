@@ -2,20 +2,40 @@ use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, List, ListItem, ListState, Paragraph, Wrap},
+    widgets::{Block, Borders, List, ListItem, ListState, Padding, Paragraph, Wrap},
     Frame,
 };
 
 use tui_kit::{
-    block::{focusable_block, panel_block, popup_block, widget_title},
+    block::{panel_block, popup_block, widget_title},
     popup::centered_popup,
     tabs::tab_line,
     toast::render_toasts,
     Theme,
 };
 
-use crate::app::{App, ConfirmDelete, FocusedWidget, HelpTab, Tab};
+use crate::app::{App, ConfirmDelete, HelpTab, Tab};
 use rad_core::PlayerState;
+
+/// Truncate `s` to at most `max_display_width` display columns (wide chars count as 2),
+/// then pad with spaces on the right so the result is exactly `col_width` columns wide.
+fn display_col(s: &str, col_width: usize) -> String {
+    let mut out = String::new();
+    let mut used = 0usize;
+    for ch in s.chars() {
+        let w = unicode_width::UnicodeWidthChar::width(ch).unwrap_or(1);
+        if used + w > col_width {
+            break;
+        }
+        out.push(ch);
+        used += w;
+    }
+    // Pad to col_width display columns
+    if used < col_width {
+        out.push_str(&" ".repeat(col_width - used));
+    }
+    out
+}
 
 pub fn draw(f: &mut Frame, app: &mut App) {
     let theme = Theme::default();
@@ -62,33 +82,26 @@ pub fn draw(f: &mut Frame, app: &mut App) {
 }
 
 fn draw_main_content(f: &mut Frame, app: &mut App, area: Rect, theme: &Theme) {
-    let tab_title = tab_line(
-        &[
-            ("Browse", matches!(app.current_tab, Tab::Browse)),
-            ("Favorites", matches!(app.current_tab, Tab::Favorites)),
-            ("History", matches!(app.current_tab, Tab::History)),
-        ],
-        theme,
-    );
+    let has_autovote = app.config.auto_vote_favorites;
+    let mut tabs: Vec<(&str, bool)> = vec![
+        ("Browse", matches!(app.current_tab, Tab::Browse)),
+        ("Favorites", matches!(app.current_tab, Tab::Favorites)),
+        ("History", matches!(app.current_tab, Tab::History)),
+    ];
+    if has_autovote {
+        tabs.push(("Autovote", matches!(app.current_tab, Tab::Autovote)));
+    }
+    let tab_title = tab_line(&tabs, theme);
 
-    // Always prepend [1]─ so the station list shows its focus shortcut
-    let station_focused = app.focused_widget == FocusedWidget::StationList && !app.has_popup();
+    let station_focused = !app.has_popup();
     let station_border_style = if station_focused { theme.border_focused } else { theme.border_unfocused };
-    let mut title_spans = vec![Span::styled("[1]\u{2500} ", station_border_style)];
+    let mut title_spans = vec![Span::styled("\u{2500} ", station_border_style)];
     title_spans.extend(tab_title.spans);
     let station_title = Line::from(title_spans);
 
-    if app.current_tab == Tab::Favorites && !app.autovote.get_all().is_empty() {
-        let autovote_h = (app.autovote.get_all().len() as u16 + 2).min(12);
-        let chunks = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([Constraint::Min(5), Constraint::Length(autovote_h)])
-            .split(area);
-
-        draw_station_list(f, app, chunks[0], station_title, theme);
-        draw_autovote_list(f, app, chunks[1], theme);
-    } else {
-        draw_station_list(f, app, area, station_title, theme);
+    match app.current_tab {
+        Tab::Autovote => draw_autovote_tab(f, app, area, station_title, theme),
+        _ => draw_station_list(f, app, area, station_title, theme),
     }
 }
 
@@ -268,11 +281,7 @@ fn draw_station_list(f: &mut Frame, app: &mut App, area: Rect, title: Line, them
         }
     }
 
-    let border_style = if app.focused_widget == FocusedWidget::StationList && !app.has_popup() {
-        theme.border_focused
-    } else {
-        theme.border_unfocused
-    };
+    let border_style = if !app.has_popup() { theme.border_focused } else { theme.border_unfocused };
 
     // Build title with station count
     let mut title_spans = title.spans;
@@ -287,11 +296,11 @@ fn draw_station_list(f: &mut Frame, app: &mut App, area: Rect, title: Line, them
     let full_title = Line::from(title_spans);
 
     // Build and render the outer block first so we can work with the inner area
-    let block = if app.current_page > 0 {
+    let block = if matches!(app.current_tab, crate::app::Tab::Browse) && app.current_page > 0 {
         let page_info = if app.is_last_page {
-            format!("Page {}", app.current_page)
+            format!(" Page {} ", app.current_page)
         } else {
-            format!("Page {} →", app.current_page)
+            format!(" Page {} ... ", app.current_page)
         };
         Block::default()
             .borders(Borders::ALL)
@@ -408,12 +417,9 @@ fn draw_station_list(f: &mut Frame, app: &mut App, area: Rect, title: Line, them
                 const COUNTRY_W: usize = 14;
                 const CODEC_W: usize = 6;
 
-                let name_str: String = station.name.chars().take(NAME_W).collect();
-                let country_str: String = station.country.chars().take(COUNTRY_W).collect();
-
-                let name_col    = format!("{:<width$}", name_str,    width = NAME_W);
-                let country_col = format!("{:<width$}", country_str, width = COUNTRY_W);
-                let codec_col   = format!("{:<width$}", station.format_codec(), width = CODEC_W);
+                let name_col    = display_col(&station.name, NAME_W);
+                let country_col = display_col(&station.country, COUNTRY_W);
+                let codec_col   = display_col(&station.format_codec(), CODEC_W);
 
                 spans.push(Span::styled(" ", base_style));
                 spans.push(Span::styled(name_col, name));
@@ -459,11 +465,11 @@ fn draw_player_and_log(f: &mut Frame, app: &App, area: Rect, theme: &Theme) {
 }
 
 fn draw_status_log(f: &mut Frame, app: &App, area: Rect, theme: &Theme) {
-    let focused = app.focused_widget == FocusedWidget::StatusLog && !app.has_popup();
-    let block = focusable_block("Status Log", Some(2), focused, theme);
+    let title = widget_title("Log", None, false, theme);
+    let block = panel_block(title, false, theme);
 
     if app.status_log.is_empty() {
-        let paragraph = Paragraph::new("No status messages yet")
+        let paragraph = Paragraph::new("No logs yet")
             .block(block)
             .alignment(Alignment::Center)
             .style(Style::default().fg(Color::DarkGray));
@@ -471,35 +477,24 @@ fn draw_status_log(f: &mut Frame, app: &App, area: Rect, theme: &Theme) {
         return;
     }
 
-    // Format is "[HH:MM:SS] message" — colour each part distinctly
-    let list_items: Vec<ListItem> = app
-        .status_log
+    // Show only the last 6 entries — no scrolling
+    let count = app.status_log.len();
+    let start = count.saturating_sub(6);
+    let list_items: Vec<ListItem> = app.status_log[start..]
         .iter()
-        .map(|msg| {
-            let line = if msg.starts_with('[') {
-                if let Some(close) = msg.find(']') {
-                    let timestamp = &msg[1..close];
-                    let rest = &msg[close + 1..];
-                    Line::from(vec![
-                        Span::styled("[", Style::default().fg(Color::Indexed(2))),
-                        Span::styled(timestamp, Style::default().fg(Color::Indexed(6))),
-                        Span::styled("]", Style::default().fg(Color::Indexed(2))),
-                        Span::styled(rest, Style::default().fg(Color::White)),
-                    ])
-                } else {
-                    Line::from(Span::styled(msg.as_str(), Style::default().fg(Color::White)))
-                }
-            } else {
-                Line::from(Span::styled(msg.as_str(), Style::default().fg(Color::White)))
-            };
+        .map(|entry| {
+            let msg_color = entry.level.color();
+            let line = Line::from(vec![
+                Span::styled("[", Style::default().fg(Color::Indexed(2))),
+                Span::styled(entry.timestamp.as_str(), Style::default().fg(Color::Indexed(6))),
+                Span::styled("] ", Style::default().fg(Color::Indexed(2))),
+                Span::styled(entry.message.as_str(), Style::default().fg(msg_color)),
+            ]);
             ListItem::new(line)
         })
         .collect();
 
-    let list = List::new(list_items).block(block);
-    let mut state = ListState::default();
-    state.select(Some(app.status_log_scroll));
-    f.render_stateful_widget(list, area, &mut state);
+    f.render_widget(List::new(list_items).block(block), area);
 }
 
 fn get_player_icon(state: PlayerState, frame: usize) -> &'static str {
@@ -645,6 +640,11 @@ fn draw_status_bar(f: &mut Frame, app: &App, area: Rect, theme: &Theme) {
             HelpTab::Settings => {
                 pairs.push(("↑↓", ":Navigate"));
                 pairs.push(("←→/Enter", ":Change"));
+                pairs.push(("Tab", ":Log"));
+                pairs.push(("Esc", ":Close"));
+            }
+            HelpTab::Log => {
+                pairs.push(("↑↓", ":Scroll"));
                 pairs.push(("Tab", ":Keys"));
                 pairs.push(("Esc", ":Close"));
             }
@@ -677,10 +677,11 @@ fn draw_status_bar(f: &mut Frame, app: &App, area: Rect, theme: &Theme) {
 
             pairs.push(("+-", ":Vol"));
             pairs.push(("f", ":Fav"));
+            pairs.push(("v", ":Vote"));
+            pairs.push(("V", ":Autovote"));
             pairs.push(("/", ":Search"));
             pairs.push(("np", ":Page"));
-            pairs.push(("[]", ":Tabs"));
-            pairs.push(("Tab", ":Focus"));
+            pairs.push(("Tab", ":Tabs"));
         }
         pairs.push(("?", ":Help"));
         pairs.push(("Ctrl+C", ":Quit"));
@@ -746,44 +747,51 @@ fn draw_error_popup(f: &mut Frame, app: &App, theme: &Theme) {
 
 fn draw_warning_popup(f: &mut Frame, app: &App, theme: &Theme) {
     if let Some(ref warning_msg) = app.warning_popup {
-        let popup_area = centered_popup(f, 0.6, 80, 10);
+        let popup_area = centered_popup(f, 0.6, 80, 7);
 
-        // Create the warning message with wrapping
-        let warning_text = vec![
-            Line::from(Span::styled(
-                "Warning",
-                Style::default()
-                    .fg(Color::Yellow)
-                    .add_modifier(Modifier::BOLD),
-            )),
-            Line::from(""),
-            Line::from(Span::raw(warning_msg)),
-        ];
-
-        let paragraph = Paragraph::new(warning_text)
+        let paragraph = Paragraph::new(Line::from(Span::raw(warning_msg.as_str())))
             .block(
                 Block::default()
                     .borders(Borders::ALL)
                     .border_style(theme.border_warning)
                     .title(" Warning ")
-                    .title_style(theme.border_warning),
+                    .title_style(theme.border_warning)
+                    .padding(Padding::uniform(1)),
             )
             .wrap(Wrap { trim: true })
-            .alignment(Alignment::Left);
+            .alignment(Alignment::Center);
 
         f.render_widget(paragraph, popup_area);
     }
 }
 
-fn draw_autovote_list(f: &mut Frame, app: &App, area: Rect, theme: &Theme) {
-    let focused = app.focused_widget == FocusedWidget::AutovoteList && !app.has_popup();
-    let block = focusable_block("Autovote", Some(3), focused, theme);
+fn draw_autovote_tab(f: &mut Frame, app: &mut App, area: Rect, title: Line, theme: &Theme) {
+    let border_style = if !app.has_popup() { theme.border_focused } else { theme.border_unfocused };
+
+    let stations = app.autovote.get_all();
+    let mut title_spans = title.spans;
+    if !stations.is_empty() {
+        title_spans.push(Span::raw(" ("));
+        title_spans.push(Span::styled(format!("{}", stations.len()), Style::default().fg(Color::Cyan)));
+        title_spans.push(Span::raw(" stations)"));
+    }
+    let full_title = Line::from(title_spans);
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title(full_title)
+        .border_style(border_style);
 
     let inner = block.inner(area);
     f.render_widget(block, area);
 
-    let stations = app.autovote.get_all();
     if stations.is_empty() {
+        f.render_widget(
+            Paragraph::new("No autovote stations. Press V on a station to add it.")
+                .alignment(Alignment::Center)
+                .style(Style::default().fg(Color::DarkGray)),
+            inner,
+        );
         return;
     }
 
@@ -791,11 +799,12 @@ fn draw_autovote_list(f: &mut Frame, app: &App, area: Rect, theme: &Theme) {
     const COUNTRY_W: usize = 14;
     const CODEC_W: usize = 6;
 
+    let autovote_selected = app.autovote_selected;
     let list_items: Vec<ListItem> = stations
         .iter()
         .enumerate()
         .map(|(i, s)| {
-            let is_selected = app.focused_widget == FocusedWidget::AutovoteList && i == app.autovote_selected;
+            let is_selected = i == autovote_selected;
             let base_style = if is_selected { theme.selection } else { Style::default().fg(Color::White) };
 
             let (name_s, country_s, codec_s, bitrate_s) = if is_selected {
@@ -809,13 +818,13 @@ fn draw_autovote_list(f: &mut Frame, app: &App, area: Rect, theme: &Theme) {
                 )
             };
 
-            let name_col    = format!("{:<width$}", s.name.chars().take(NAME_W).collect::<String>(), width = NAME_W);
-            let country_col = format!("{:<width$}", s.country.chars().take(COUNTRY_W).collect::<String>(), width = COUNTRY_W);
-            let codec_col   = format!("{:<width$}", if s.codec.is_empty() { "—".to_string() } else { s.codec.clone() }, width = CODEC_W);
+            let name_col    = display_col(&s.name, NAME_W);
+            let country_col = display_col(&s.country, COUNTRY_W);
+            let codec_col   = display_col(if s.codec.is_empty() { "—" } else { &s.codec }, CODEC_W);
             let bitrate_str = if s.bitrate > 0 { format!("{} kbps", s.bitrate) } else { "—".to_string() };
 
             let line = Line::from(vec![
-                Span::styled("    ", base_style), // 4-char prefix to align with favorites list
+                Span::styled("    ", base_style),
                 Span::styled(name_col, name_s),
                 Span::styled("  ", base_style),
                 Span::styled(country_col, country_s),
@@ -830,10 +839,42 @@ fn draw_autovote_list(f: &mut Frame, app: &App, area: Rect, theme: &Theme) {
 
     let list = List::new(list_items);
     let mut state = ListState::default();
-    if app.focused_widget == FocusedWidget::AutovoteList {
-        state.select(Some(app.autovote_selected));
-    }
+    state.select(Some(autovote_selected));
     f.render_stateful_widget(list, inner, &mut state);
+}
+
+fn draw_help_log_content(f: &mut Frame, app: &App, area: Rect) {
+    if app.status_log.is_empty() {
+        f.render_widget(
+            Paragraph::new("No logs yet.")
+                .alignment(Alignment::Center)
+                .style(Style::default().fg(Color::DarkGray)),
+            area,
+        );
+        return;
+    }
+
+    let count = app.status_log.len();
+    let visible = area.height as usize;
+    let max_scroll = count.saturating_sub(visible);
+    let scroll = app.help_log_scroll.min(max_scroll);
+    let end = count.min(scroll + visible);
+
+    let list_items: Vec<ListItem> = app.status_log[scroll..end]
+        .iter()
+        .map(|entry| {
+            let msg_color = entry.level.color();
+            let line = Line::from(vec![
+                Span::styled("[", Style::default().fg(Color::Indexed(2))),
+                Span::styled(entry.timestamp.as_str(), Style::default().fg(Color::Indexed(6))),
+                Span::styled("] ", Style::default().fg(Color::Indexed(2))),
+                Span::styled(entry.message.as_str(), Style::default().fg(msg_color)),
+            ]);
+            ListItem::new(line)
+        })
+        .collect();
+
+    f.render_widget(List::new(list_items), area);
 }
 
 fn draw_confirm_delete_popup(f: &mut Frame, app: &App, theme: &Theme) {
@@ -878,28 +919,28 @@ fn draw_confirm_delete_popup(f: &mut Frame, app: &App, theme: &Theme) {
 fn draw_help_popup(f: &mut Frame, app: &App, theme: &Theme) {
     let popup_area = centered_popup(f, 0.7, 90, 26);
 
-    // Tab titles in the border title — same pattern as the main station list tabs
     let title = tab_line(
         &[
             ("Keys", app.help_tab == HelpTab::Keys),
             ("Settings", app.help_tab == HelpTab::Settings),
+            ("Log", app.help_tab == HelpTab::Log),
         ],
         theme,
     );
     let block = popup_block(title, theme);
     f.render_widget(block, popup_area);
 
-    // Content fills the interior directly (no inner tab bar or separator)
     let content_area = Rect {
-        x: popup_area.x + 1,
-        y: popup_area.y + 1,
-        width: popup_area.width.saturating_sub(2),
-        height: popup_area.height.saturating_sub(2),
+        x: popup_area.x + 2,
+        y: popup_area.y + 2,
+        width: popup_area.width.saturating_sub(4),
+        height: popup_area.height.saturating_sub(4),
     };
 
     match app.help_tab {
         HelpTab::Keys => draw_help_keys_content(f, content_area),
         HelpTab::Settings => draw_help_settings_content(f, app, content_area, theme),
+        HelpTab::Log => draw_help_log_content(f, app, content_area),
     }
 }
 
@@ -913,23 +954,19 @@ fn draw_help_keys_content(f: &mut Frame, area: Rect) {
         )]),
         Line::from(vec![
             Span::styled("  ↑/↓         ", Style::default().fg(Color::Yellow)),
-            Span::raw("Navigate focused widget (station list or log)"),
+            Span::raw("Navigate station list"),
         ]),
         Line::from(vec![
             Span::styled("  Tab         ", Style::default().fg(Color::Yellow)),
-            Span::raw("Cycle focus between widgets"),
+            Span::raw("Cycle tabs (Browse / Favorites / History / Autovote)"),
         ]),
         Line::from(vec![
-            Span::styled("  [ / ]       ", Style::default().fg(Color::Yellow)),
-            Span::raw("Switch list tab (Browse/Favorites/History)"),
+            Span::styled("  1/2/3/4     ", Style::default().fg(Color::Yellow)),
+            Span::raw("Jump to Browse / Favorites / History / Autovote tab"),
         ]),
         Line::from(vec![
             Span::styled("  n / p       ", Style::default().fg(Color::Yellow)),
-            Span::raw("Next / previous page"),
-        ]),
-        Line::from(vec![
-            Span::styled("  1 / 2 / 3   ", Style::default().fg(Color::Yellow)),
-            Span::raw("Focus station list / log / autovote (Favorites)"),
+            Span::raw("Next / previous page (Browse tab only)"),
         ]),
         Line::from(""),
         Line::from(vec![Span::styled(
@@ -985,6 +1022,10 @@ fn draw_help_keys_content(f: &mut Frame, area: Rect) {
             Span::styled("  v           ", Style::default().fg(Color::Yellow)),
             Span::raw("Vote for selected station"),
         ]),
+        Line::from(vec![
+            Span::styled("  V           ", Style::default().fg(Color::Yellow)),
+            Span::raw("Toggle selected station in autovote list"),
+        ]),
         Line::from(""),
         Line::from(vec![
             Span::styled("  Ctrl+C      ", Style::default().fg(Color::Yellow)),
@@ -998,7 +1039,11 @@ fn draw_help_keys_content(f: &mut Frame, area: Rect) {
 fn draw_help_settings_content(f: &mut Frame, app: &App, area: Rect, theme: &Theme) {
     let label_width = 22usize;
 
-    let toast_duration_label = format!("{}s", app.config.toast_duration_secs);
+    let toast_duration_label = if app.config.toast_duration_secs == 0 {
+        "Off".to_string()
+    } else {
+        format!("{}s", app.config.toast_duration_secs)
+    };
     let settings: &[(&str, &str)] = &[
         ("Startup Tab", app.config.startup_tab.label()),
         (
@@ -1014,7 +1059,7 @@ fn draw_help_settings_content(f: &mut Frame, app: &App, area: Rect, theme: &Them
             },
         ),
         (
-            "Auto-vote Favorites",
+            "Autovote",
             if app.config.auto_vote_favorites {
                 "On"
             } else {

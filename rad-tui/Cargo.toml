@@ -29,6 +29,7 @@ chrono = { workspace = true }
 # TUI-specific dependencies
 ratatui = "0.28"
 crossterm = "0.28"
+unicode-width = "0.2"
 
 # CLI mode (used when running with arguments)
 cliclack = "0.2"

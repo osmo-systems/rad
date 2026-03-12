@@ -14,7 +14,7 @@ use tokio::time::interval;
 use tracing::info;
 use tracing_subscriber;
 
-use crate::app::{App, ConfirmDelete, FocusedWidget, HelpTab, Tab};
+use crate::app::{App, ConfirmDelete, HelpTab, Tab};
 use rad_core::{
     config::{cleanup_old_logs, get_data_dir, TOAST_DURATION_OPTIONS},
     search::{get_suggestions, parse_query},
@@ -266,12 +266,32 @@ async fn handle_key_event(
                 }
                 _ => {}
             },
-            HelpTab::Settings => match key {
+            HelpTab::Log => match key {
                 KeyCode::Esc | KeyCode::Char('?') => {
                     app.help_popup = false;
                 }
                 KeyCode::Tab => {
                     app.help_tab = HelpTab::Keys;
+                }
+                KeyCode::Up | KeyCode::Char('k') => {
+                    if app.help_log_scroll > 0 {
+                        app.help_log_scroll -= 1;
+                    }
+                }
+                KeyCode::Down | KeyCode::Char('j') => {
+                    let count = app.status_log.len();
+                    if count > 0 && app.help_log_scroll < count - 1 {
+                        app.help_log_scroll += 1;
+                    }
+                }
+                _ => {}
+            },
+            HelpTab::Settings => match key {
+                KeyCode::Esc | KeyCode::Char('?') => {
+                    app.help_popup = false;
+                }
+                KeyCode::Tab => {
+                    app.help_tab = HelpTab::Log;
                 }
                 KeyCode::Up | KeyCode::Char('k') => {
                     if app.settings_selected > 0 {
@@ -301,6 +321,11 @@ async fn handle_key_event(
                         3 => {
                             app.config.auto_vote_favorites = !app.config.auto_vote_favorites;
                             let _ = app.config.save(&app.data_dir);
+                            // If autovote was just disabled, leave the Autovote tab
+                            if !app.config.auto_vote_favorites && app.current_tab == Tab::Autovote {
+                                app.current_tab = Tab::Favorites;
+                                app.reload_current_tab();
+                            }
                         }
                         4 => {
                             app.config.show_logo = !app.config.show_logo;
@@ -338,6 +363,10 @@ async fn handle_key_event(
                         3 => {
                             app.config.auto_vote_favorites = !app.config.auto_vote_favorites;
                             let _ = app.config.save(&app.data_dir);
+                            if !app.config.auto_vote_favorites && app.current_tab == Tab::Autovote {
+                                app.current_tab = Tab::Favorites;
+                                app.reload_current_tab();
+                            }
                         }
                         4 => {
                             app.config.show_logo = !app.config.show_logo;
@@ -406,7 +435,8 @@ async fn handle_key_event(
                             app.show_toast(format!("Removed {} from autovote", name), tui_kit::ToastLevel::Warning);
                             let count = app.autovote.get_all().len();
                             if count == 0 {
-                                app.focused_widget = FocusedWidget::StationList;
+                                app.current_tab = Tab::Favorites;
+                                app.reload_current_tab();
                                 app.autovote_selected = 0;
                             } else if app.autovote_selected >= count {
                                 app.autovote_selected = count - 1;
@@ -508,26 +538,22 @@ async fn handle_key_event(
         }
         KeyCode::Char('q') | KeyCode::Char('Q') => app.quit(),
         KeyCode::Up => {
-            match app.focused_widget {
-                FocusedWidget::StatusLog => app.scroll_log_up(),
-                FocusedWidget::AutovoteList => {
-                    if app.autovote_selected > 0 {
-                        app.autovote_selected -= 1;
-                    }
+            if app.current_tab == Tab::Autovote {
+                if app.autovote_selected > 0 {
+                    app.autovote_selected -= 1;
                 }
-                FocusedWidget::StationList => app.select_prev(),
+            } else {
+                app.select_prev();
             }
         }
         KeyCode::Down => {
-            match app.focused_widget {
-                FocusedWidget::StatusLog => app.scroll_log_down(),
-                FocusedWidget::AutovoteList => {
-                    let count = app.autovote.get_all().len();
-                    if app.autovote_selected + 1 < count {
-                        app.autovote_selected += 1;
-                    }
+            if app.current_tab == Tab::Autovote {
+                let count = app.autovote.get_all().len();
+                if app.autovote_selected + 1 < count {
+                    app.autovote_selected += 1;
                 }
-                FocusedWidget::StationList => app.select_next(),
+            } else {
+                app.select_next();
             }
         }
         KeyCode::PageUp => {
@@ -609,24 +635,41 @@ async fn handle_key_event(
             app.toggle_autovote();
         }
         KeyCode::Char('1') => {
-            app.focused_widget = FocusedWidget::StationList;
+            if app.current_tab != Tab::Browse {
+                if matches!(app.current_tab, Tab::Browse) { app.browse_stations = app.stations.clone(); }
+                app.current_tab = Tab::Browse;
+                app.reload_current_tab();
+            }
         }
         KeyCode::Char('2') => {
-            app.focused_widget = FocusedWidget::StatusLog;
+            if app.current_tab != Tab::Favorites {
+                if matches!(app.current_tab, Tab::Browse) { app.browse_stations = app.stations.clone(); }
+                app.current_tab = Tab::Favorites;
+                app.reload_current_tab();
+            }
         }
         KeyCode::Char('3') => {
-            if app.current_tab == Tab::Favorites && !app.autovote.get_all().is_empty() {
-                app.focused_widget = FocusedWidget::AutovoteList;
+            if app.current_tab != Tab::History {
+                if matches!(app.current_tab, Tab::Browse) { app.browse_stations = app.stations.clone(); }
+                app.current_tab = Tab::History;
+                app.reload_current_tab();
+            }
+        }
+        KeyCode::Char('4') => {
+            if app.config.auto_vote_favorites && app.current_tab != Tab::Autovote {
+                if matches!(app.current_tab, Tab::Browse) { app.browse_stations = app.stations.clone(); }
+                app.current_tab = Tab::Autovote;
                 app.autovote_selected = 0;
+                app.reload_current_tab();
             }
         }
         KeyCode::Char('d') | KeyCode::Char('D') => {
-            if app.current_tab == Tab::Favorites {
-                if app.focused_widget == FocusedWidget::AutovoteList {
-                    if let Some(s) = app.autovote.get_all().get(app.autovote_selected) {
-                        app.confirm_delete = Some(ConfirmDelete::Autovote(s.uuid.clone(), s.name.clone()));
-                    }
-                } else if let Some(s) = app.get_selected_station() {
+            if app.current_tab == Tab::Autovote {
+                if let Some(s) = app.autovote.get_all().get(app.autovote_selected) {
+                    app.confirm_delete = Some(ConfirmDelete::Autovote(s.uuid.clone(), s.name.clone()));
+                }
+            } else if app.current_tab == Tab::Favorites {
+                if let Some(s) = app.get_selected_station() {
                     app.confirm_delete = Some(ConfirmDelete::Favorite(s.station_uuid.clone(), s.name.clone()));
                 }
             }
@@ -640,33 +683,26 @@ async fn handle_key_event(
             }
         }
         KeyCode::Tab => {
-            // Cycle focus between widgets on screen
-            app.cycle_focus();
-        }
-        KeyCode::BackTab => {
-            // Shift+Tab: previous list tab
-            app.prev_tab();
-        }
-        KeyCode::Char('[') => {
-            // Previous list tab (Browse/Favorites/History)
-            app.prev_tab();
-        }
-        KeyCode::Char(']') => {
-            // Next list tab (Browse/Favorites/History)
+            // Cycle through station list tabs
             app.next_tab();
         }
+        KeyCode::BackTab => {
+            app.prev_tab();
+        }
         KeyCode::Char('n') => {
-            // Next page
-            tracing::info!("'n' pressed: current_page={}, is_last_page={}", app.current_page, app.is_last_page);
-            if !app.is_last_page {
+            if app.current_tab != Tab::Browse {
+                app.show_warning("No pagination on this tab".to_string());
+            } else if !app.is_last_page {
+                tracing::info!("'n' pressed: current_page={}", app.current_page);
                 app.pending_page_change = Some(1);
             } else {
                 app.show_warning("Already on last page".to_string());
             }
         }
         KeyCode::Char('p') => {
-            // Previous page
-            if app.current_page > 1 {
+            if app.current_tab != Tab::Browse {
+                app.show_warning("No pagination on this tab".to_string());
+            } else if app.current_page > 1 {
                 app.pending_page_change = Some(-1);
             } else {
                 app.show_warning("Already on first page".to_string());
