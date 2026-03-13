@@ -274,8 +274,8 @@ impl RadioBrowserClient {
             // tagList = AND logic (all tags must match)
             // Encode each tag separately, then join with comma (comma must NOT be encoded)
             let tag_str = tags.iter()
-                .map(|t| urlencoding::encode(t).to_string())
-                .collect::<Vec<_>>()
+                .map(|t: &String| urlencoding::encode(t).to_string())
+                .collect::<Vec<String>>()
                 .join(",");
             params.push(format!("tagList={}", tag_str));
         }

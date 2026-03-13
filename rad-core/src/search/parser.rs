@@ -1,169 +1,17 @@
-use std::fmt;
+pub use super::types::{ParseError, SearchQuery};
+pub use super::validation::{is_default_query, validate_field};
 
-/// Represents a parsed search query
-#[derive(Debug, Clone, PartialEq)]
-pub struct SearchQuery {
-    pub name: Option<String>,
-    pub country: Option<String>,
-    pub countrycode: Option<String>,
-    pub state: Option<String>,
-    pub language: Option<String>,
-    pub tags: Option<Vec<String>>,
-    pub codec: Option<String>,
-    pub bitrate_min: Option<u32>,
-    pub bitrate_max: Option<u32>,
-    pub order: Option<String>,
-    pub reverse: Option<bool>,
-    pub hidebroken: Option<bool>,
-    pub is_https: Option<bool>,
-    pub limit: usize,
-    pub offset: usize,
-}
+use super::validation::VALID_ORDER_VALUES;
 
-impl Default for SearchQuery {
-    fn default() -> Self {
-        Self {
-            name: None,
-            country: None,
-            countrycode: None,
-            state: None,
-            language: None,
-            tags: None,
-            codec: None,
-            bitrate_min: None,
-            bitrate_max: None,
-            order: Some("votes".to_string()),
-            reverse: Some(true),
-            hidebroken: Some(true),
-            is_https: None,
-            limit: 12,
-            offset: 0,
-        }
-    }
-}
-
-impl SearchQuery {
-    /// Move to next page
-    pub fn next_page(&mut self) {
-        self.offset += self.limit;
-    }
-
-    /// Move to previous page
-    pub fn prev_page(&mut self) {
-        self.offset = self.offset.saturating_sub(self.limit);
-    }
-
-    /// Get current page number (1-indexed)
-    pub fn current_page(&self) -> usize {
-        (self.offset / self.limit) + 1
-    }
-
-    /// Reset to first page
-    pub fn reset_pagination(&mut self) {
-        self.offset = 0;
-    }
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub enum ParseError {
-    UnknownField(String),
-    InvalidSyntax(String),
-    InvalidValue {
-        field: String,
-        value: String,
-        reason: String,
-    },
-    MissingEquals(String),
-}
-
-impl fmt::Display for ParseError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            ParseError::UnknownField(field) => write!(f, "Unknown field: '{}'", field),
-            ParseError::InvalidSyntax(msg) => write!(f, "Invalid syntax: {}", msg),
-            ParseError::InvalidValue {
-                field,
-                value,
-                reason,
-            } => {
-                write!(
-                    f,
-                    "Invalid value '{}' for field '{}': {}",
-                    value, field, reason
-                )
-            }
-            ParseError::MissingEquals(field) => {
-                write!(f, "Missing '=' after field '{}'", field)
-            }
-        }
-    }
-}
-
-impl std::error::Error for ParseError {}
-
-/// Valid field names for search queries
-const VALID_FIELDS: &[&str] = &[
-    "name",
-    "country",
-    "countrycode",
-    "state",
-    "language",
-    "tag",
-    "codec",
-    "bitrate_min",
-    "bitrate_max",
-    "order",
-    "reverse",
-    "hidebroken",
-    "is_https",
-    "page",
-];
-
-/// Valid order field values
-const VALID_ORDER_VALUES: &[&str] = &[
-    "name",
-    "votes",
-    "clickcount",
-    "bitrate",
-    "changetimestamp",
-    "random",
-];
-
-/// Validate a field name
-pub fn validate_field(field: &str) -> bool {
-    VALID_FIELDS.contains(&field)
-}
-
-/// Check if a query is the default query
-pub fn is_default_query(query: &SearchQuery) -> bool {
-    let default = SearchQuery::default();
-    query.name.is_none()
-        && query.country.is_none()
-        && query.countrycode.is_none()
-        && query.state.is_none()
-        && query.language.is_none()
-        && query.tags.is_none()
-        && query.codec.is_none()
-        && query.bitrate_min.is_none()
-        && query.bitrate_max.is_none()
-        && query.is_https.is_none()
-        && query.order == default.order
-        && query.reverse == default.reverse
-        && query.hidebroken == default.hidebroken
-}
-
-/// Tokenize input respecting quoted strings
 fn tokenize_query(input: &str) -> Vec<String> {
     let mut tokens = Vec::new();
     let mut current_token = String::new();
     let mut in_quotes = false;
-    let mut chars = input.chars().peekable();
 
-    while let Some(ch) = chars.next() {
+    for ch in input.chars() {
         match ch {
             '"' => {
                 in_quotes = !in_quotes;
-                // Don't include the quotes in the token
             }
             ' ' if !in_quotes => {
                 if !current_token.is_empty() {
@@ -184,30 +32,24 @@ fn tokenize_query(input: &str) -> Vec<String> {
     tokens
 }
 
-/// Parse a search query string
-/// Format: "field=value1,value2 field2=value3"
-/// Values with spaces should be quoted: field="value with spaces"
+/// Parse a search query string.
+/// Format: `field=value1,value2 field2=value3`
+/// Values with spaces should be quoted: `field="value with spaces"`
 pub fn parse_query(input: &str) -> Result<SearchQuery, ParseError> {
     let input = input.trim();
 
-    // Empty string returns default query
     if input.is_empty() {
         return Ok(SearchQuery::default());
     }
 
     let mut query = SearchQuery::default();
-
-    // Split by spaces to get field=value pairs, respecting quotes
     let pairs = tokenize_query(input);
-
     let mut bare_words: Vec<String> = Vec::new();
 
     for pair in pairs {
-        // Split by '=' to get field and value
         let parts: Vec<&str> = pair.splitn(2, '=').collect();
 
         if parts.len() != 2 {
-            // Bare word: treated as an implicit name filter
             bare_words.push(parts[0].to_string());
             continue;
         }
@@ -215,12 +57,10 @@ pub fn parse_query(input: &str) -> Result<SearchQuery, ParseError> {
         let field = parts[0].trim().to_lowercase();
         let value = parts[1].trim();
 
-        // Validate field name
         if !validate_field(&field) {
             return Err(ParseError::UnknownField(field));
         }
 
-        // Parse based on field type
         match field.as_str() {
             "name" => {
                 query.name = Some(value.to_string());
@@ -320,8 +160,8 @@ pub fn parse_query(input: &str) -> Result<SearchQuery, ParseError> {
                 query.order = Some(order_value);
             }
             "reverse" => {
-                let reverse_value = value.to_lowercase();
-                match reverse_value.as_str() {
+                let v = value.to_lowercase();
+                match v.as_str() {
                     "true" => query.reverse = Some(true),
                     "false" => query.reverse = Some(false),
                     _ => {
@@ -334,8 +174,8 @@ pub fn parse_query(input: &str) -> Result<SearchQuery, ParseError> {
                 }
             }
             "hidebroken" => {
-                let hidebroken_value = value.to_lowercase();
-                match hidebroken_value.as_str() {
+                let v = value.to_lowercase();
+                match v.as_str() {
                     "true" => query.hidebroken = Some(true),
                     "false" => query.hidebroken = Some(false),
                     _ => {
@@ -348,8 +188,8 @@ pub fn parse_query(input: &str) -> Result<SearchQuery, ParseError> {
                 }
             }
             "is_https" => {
-                let is_https_value = value.to_lowercase();
-                match is_https_value.as_str() {
+                let v = value.to_lowercase();
+                match v.as_str() {
                     "true" => query.is_https = Some(true),
                     "false" => query.is_https = Some(false),
                     _ => {
@@ -364,7 +204,6 @@ pub fn parse_query(input: &str) -> Result<SearchQuery, ParseError> {
             "page" => {
                 match value.parse::<usize>() {
                     Ok(page_num) if page_num > 0 => {
-                        // Convert page number (1-indexed) to offset
                         query.offset = (page_num - 1) * query.limit;
                     }
                     _ => {
@@ -376,12 +215,10 @@ pub fn parse_query(input: &str) -> Result<SearchQuery, ParseError> {
                     }
                 }
             }
-            _ => unreachable!(), // Already validated field name
+            _ => unreachable!(),
         }
     }
 
-    // Bare words are joined and used as an implicit name filter (takes precedence if
-    // no explicit `name=` field was given)
     if !bare_words.is_empty() && query.name.is_none() {
         query.name = Some(bare_words.join(" "));
     }
@@ -409,7 +246,8 @@ pub fn format_query(query: &SearchQuery) -> String {
         parts.push(format!("language={}", language));
     }
     if let Some(tags) = &query.tags {
-        parts.push(format!("tag={}", tags.join(",")));
+        let joined: String = tags.join(",");
+        parts.push(format!("tag={}", joined));
     }
     if let Some(codec) = &query.codec {
         parts.push(format!("codec={}", codec));
@@ -421,19 +259,16 @@ pub fn format_query(query: &SearchQuery) -> String {
         parts.push(format!("bitrate_max={}", bitrate_max));
     }
     if let Some(order) = &query.order {
-        // Only include if not default
         if order != "votes" {
             parts.push(format!("order={}", order));
         }
     }
     if let Some(reverse) = query.reverse {
-        // Only include if not default
         if !reverse {
             parts.push(format!("reverse=false"));
         }
     }
     if let Some(hidebroken) = query.hidebroken {
-        // Only include if not default
         if !hidebroken {
             parts.push(format!("hidebroken=false"));
         }
@@ -463,7 +298,6 @@ mod tests {
 
     #[test]
     fn test_parse_multiple_values() {
-        // Multiple comma-separated countries are not supported; this returns an error
         let result = parse_query("country=france,germany");
         assert!(matches!(result, Err(ParseError::InvalidValue { .. })));
     }
@@ -498,21 +332,18 @@ mod tests {
 
     #[test]
     fn test_bare_word_as_name() {
-        // A single bare word (no '=') is treated as an implicit name filter
         let query = parse_query("jazz").unwrap();
         assert_eq!(query.name, Some("jazz".to_string()));
     }
 
     #[test]
     fn test_bare_words_joined_as_name() {
-        // Multiple bare words are joined with a space into the name filter
         let query = parse_query("jazz radio").unwrap();
         assert_eq!(query.name, Some("jazz radio".to_string()));
     }
 
     #[test]
     fn test_bare_word_does_not_override_explicit_name() {
-        // Explicit `name=` takes precedence; extra bare words are ignored
         let query = parse_query("name=blues extra").unwrap();
         assert_eq!(query.name, Some("blues".to_string()));
     }
@@ -557,7 +388,7 @@ mod tests {
 
         query.next_page();
         assert_eq!(query.current_page(), 2);
-        assert_eq!(query.offset, query.limit); // offset advances by one page (limit)
+        assert_eq!(query.offset, query.limit);
 
         query.prev_page();
         assert_eq!(query.current_page(), 1);
