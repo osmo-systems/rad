@@ -135,11 +135,12 @@ fn draw_radio_art(f: &mut Frame, app: &App, area: Rect, theme: &Theme) {
                 Line::from(""),
                 Line::from(Span::styled("_II_", body_style)),
                 Line::from(Span::styled("I||I", body_style)),
-                Line::from(Span::styled("██████╗  █████╗ ██████╗", logo_style)),
-                Line::from(Span::styled("██   ██╗██   ██╗██   ██╗", logo_style)),
-                Line::from(Span::styled("██████╔╝███████║██   ██║", logo_style)),
-                Line::from(Span::styled("██   ██╗██   ██║██   ██║", logo_style)),
-                Line::from(Span::styled("██   ██║██   ██║██████╔╝", logo_style)),
+                Line::from(Span::styled("██████╗  █████╗ ██████╗ ", logo_style)),
+                Line::from(Span::styled("██╔══██╗██╔══██╗██╔══██╗", logo_style)),
+                Line::from(Span::styled("██████╔╝███████║██║  ██║", logo_style)),
+                Line::from(Span::styled("██╔══██╗██╔══██║██║  ██║", logo_style)),
+                Line::from(Span::styled("██║  ██║██║  ██║██████╔╝", logo_style)),
+                Line::from(Span::styled("╚═╝  ╚═╝╚═╝  ╚═╝╚═════╝ ", logo_style)),
                 Line::from(""),
                 Line::from(Span::styled("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~", Style::default().fg(wave_color))),
             ]
@@ -184,11 +185,12 @@ fn draw_radio_art(f: &mut Frame, app: &App, area: Rect, theme: &Theme) {
                 Line::from(""),
                 Line::from(Span::styled("_II_", body_style)),
                 Line::from(Span::styled("I||I", body_style)),
-                Line::from(Span::styled("██████╗  █████╗ ██████╗", logo_style)),
-                Line::from(Span::styled("██   ██╗██   ██╗██   ██╗", logo_style)),
-                Line::from(Span::styled("██████╔╝███████║██   ██║", logo_style)),
-                Line::from(Span::styled("██   ██╗██   ██║██   ██║", logo_style)),
-                Line::from(Span::styled("██   ██║██   ██║██████╔╝", logo_style)),
+                Line::from(Span::styled("██████╗  █████╗ ██████╗ ", logo_style)),
+                Line::from(Span::styled("██╔══██╗██╔══██╗██╔══██╗", logo_style)),
+                Line::from(Span::styled("██████╔╝███████║██║  ██║", logo_style)),
+                Line::from(Span::styled("██╔══██╗██╔══██║██║  ██║", logo_style)),
+                Line::from(Span::styled("██║  ██║██║  ██║██████╔╝", logo_style)),
+                Line::from(Span::styled("╚═╝  ╚═╝╚═╝  ╚═╝╚═════╝ ", logo_style)),
                 Line::from(""),
                 Line::from(Span::styled(SCAN_BARS[scan], Style::default().fg(Color::Cyan))),
             ]
@@ -212,11 +214,12 @@ fn draw_radio_art(f: &mut Frame, app: &App, area: Rect, theme: &Theme) {
                 ]),
                 Line::from(Span::styled("_II_", body_style)),
                 Line::from(Span::styled("I||I", body_style)),
-                Line::from(Span::styled("██████╗  █████╗ ██████╗", logo_style)),
-                Line::from(Span::styled("██   ██╗██   ██╗██   ██╗", logo_style)),
-                Line::from(Span::styled("██████╔╝███████║██   ██║", logo_style)),
-                Line::from(Span::styled("██   ██╗██   ██║██   ██║", logo_style)),
-                Line::from(Span::styled("██   ██║██   ██║██████╔╝", logo_style)),
+                Line::from(Span::styled("██████╗  █████╗ ██████╗ ", logo_style)),
+                Line::from(Span::styled("██╔══██╗██╔══██╗██╔══██╗", logo_style)),
+                Line::from(Span::styled("██████╔╝███████║██║  ██║", logo_style)),
+                Line::from(Span::styled("██╔══██╗██╔══██║██║  ██║", logo_style)),
+                Line::from(Span::styled("██║  ██║██║  ██║██████╔╝", logo_style)),
+                Line::from(Span::styled("╚═╝  ╚═╝╚═╝  ╚═╝╚═════╝ ", logo_style)),
                 Line::from(""),
                 Line::from(Span::styled(stars_bot, Style::default().fg(Color::DarkGray))),
             ]
@@ -235,11 +238,12 @@ fn draw_radio_art(f: &mut Frame, app: &App, area: Rect, theme: &Theme) {
                 Line::from(""),
                 Line::from(Span::styled("_I\\_", body_style)),
                 Line::from(Span::styled("I||I", body_style)),
-                Line::from(Span::styled("██████╗  █████╗ ██████╗", logo_style)),
-                Line::from(Span::styled("██   ██╗██   ██╗██   ██╗", logo_style)),
-                Line::from(Span::styled("██████╔╝███████║██   ██║", logo_style)),
-                Line::from(Span::styled("██   ██╗██   ██║██   ██║", logo_style)),
-                Line::from(Span::styled("██   ██║██   ██║██████╔╝", logo_style)),
+                Line::from(Span::styled("██████╗  █████╗ ██████╗ ", logo_style)),
+                Line::from(Span::styled("██╔══██╗██╔══██╗██╔══██╗", logo_style)),
+                Line::from(Span::styled("██████╔╝███████║██║  ██║", logo_style)),
+                Line::from(Span::styled("██╔══██╗██╔══██║██║  ██║", logo_style)),
+                Line::from(Span::styled("██║  ██║██║  ██║██████╔╝", logo_style)),
+                Line::from(Span::styled("╚═╝  ╚═╝╚═╝  ╚═╝╚═════╝ ", logo_style)),
                 Line::from(""),
                 Line::from(Span::styled("- - - - - - - - - - - - -", Style::default().fg(Color::DarkGray))),
             ]
@@ -253,11 +257,12 @@ fn draw_radio_art(f: &mut Frame, app: &App, area: Rect, theme: &Theme) {
                 Line::from(""),
                 Line::from(Span::styled("_II_", body_style)),
                 Line::from(Span::styled("I||I", body_style)),
-                Line::from(Span::styled("██████╗  █████╗ ██████╗", logo_style)),
-                Line::from(Span::styled("██   ██╗██   ██╗██   ██╗", logo_style)),
-                Line::from(Span::styled("██████╔╝███████║██   ██║", logo_style)),
-                Line::from(Span::styled("██   ██╗██   ██║██   ██║", logo_style)),
-                Line::from(Span::styled("██   ██║██   ██║██████╔╝", logo_style)),
+                Line::from(Span::styled("██████╗  █████╗ ██████╗ ", logo_style)),
+                Line::from(Span::styled("██╔══██╗██╔══██╗██╔══██╗", logo_style)),
+                Line::from(Span::styled("██████╔╝███████║██║  ██║", logo_style)),
+                Line::from(Span::styled("██╔══██╗██╔══██║██║  ██║", logo_style)),
+                Line::from(Span::styled("██║  ██║██║  ██║██████╔╝", logo_style)),
+                Line::from(Span::styled("╚═╝  ╚═╝╚═╝  ╚═╝╚═════╝", logo_style)),
                 Line::from(""),
                 Line::from(Span::styled("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~", dim)),
             ]
@@ -326,7 +331,7 @@ fn draw_station_list(f: &mut Frame, app: &mut App, area: Rect, title: Line, them
     // We cap the list widget at this width; any remaining space goes to the logo.
     const MAX_LIST_CONTENT_WIDTH: u16 = 80;
     const ART_WIDTH: u16 = 33;
-    const ART_HEIGHT: u16 = 11;
+    const ART_HEIGHT: u16 = 12;
 
     let list_width = inner.width.min(MAX_LIST_CONTENT_WIDTH);
     let remaining = inner.width.saturating_sub(list_width);
