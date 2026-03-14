@@ -26,6 +26,9 @@ pub async fn run(args: Vec<String>, data_dir: &PathBuf) -> Result<()> {
         Some("help") | Some("-h") | Some("--help") => {
             print_help();
         }
+        Some("completion") => {
+            print_completion_zsh();
+        }
         _ => {
             // All other commands require a daemon connection
             let daemon_client = PlayerDaemonClient::new()?;
@@ -62,7 +65,7 @@ pub async fn run(args: Vec<String>, data_dir: &PathBuf) -> Result<()> {
                         }
                     }
                 }
-                Some("pause") => {
+                Some("stop") => {
                     let info = daemon_conn.get_status().await
                         .map_err(|e| { eprintln!("Error: {}", e); e })?;
                     if info.state == rad_core::PlayerState::Paused {
@@ -73,7 +76,7 @@ pub async fn run(args: Vec<String>, data_dir: &PathBuf) -> Result<()> {
                         println!("Paused: {}", station);
                     }
                 }
-                Some("start") => {
+                Some("play") => {
                     match daemon_conn.get_status().await {
                         Ok(info) => {
                             if info.state == rad_core::PlayerState::Paused {
@@ -100,7 +103,7 @@ pub async fn run(args: Vec<String>, data_dir: &PathBuf) -> Result<()> {
                         }
                     }
                 }
-                Some("zap") => {
+                Some("kill") => {
                     let info = daemon_conn.get_status().await
                         .map_err(|e| { eprintln!("Error: {}", e); e })?;
                     daemon_conn.shutdown().await.map_err(|e| { eprintln!("Error: {}", e); e })?;
@@ -154,9 +157,9 @@ pub async fn run(args: Vec<String>, data_dir: &PathBuf) -> Result<()> {
                     }
                 }
                 Some(cmd) => {
+                    eprintln!("Error: Unknown command '{}'.\n", cmd);
                     print_help();
-                    eprintln!("Error: Unknown command '{}'.", cmd);
-                    return Err(anyhow::anyhow!("Unknown command: {}", cmd));
+                    std::process::exit(1);
                 }
             }
 
@@ -339,9 +342,9 @@ fn print_help() {
     println!("│                                                            │");
     println!("│ Playback:                                                  │");
     println!("│   info                Show current player status           │");
-    println!("│   pause               Pause playback                       │");
-    println!("│   start               Resume or replay last station        │");
-    println!("│   zap                 Stop playback                        │");
+    println!("│   play                Resume or replay last station        │");
+    println!("│   stop                Pause playback                       │");
+    println!("│   kill                Kill the daemon and stop playback    │");
     println!("│   volume <0-100>      Set volume (0-100%)                  │");
     println!("│   volume --up [amt]   Increase volume (default 10%)        │");
     println!("│   volume --down [amt] Decrease volume (default 10%)        │");
@@ -353,5 +356,56 @@ fn print_help() {
     println!("│   find --language X   Filter by language                   │");
     println!("│   find --limit 20     Set result limit (default: 100)      │");
     println!("│   find --skip N       Paginate results                     │");
+    println!("│                                                            │");
+    println!("│ Other:                                                     │");
+    println!("│   help                Show this help message               │");
+    println!("│   completion          Print zsh completion script          │");
     println!("╰────────────────────────────────────────────────────────────╯\n");
+}
+
+fn print_completion_zsh() {
+    print!("{}", r#"#compdef rad
+
+_rad() {
+  local -a commands
+  commands=(
+    'info:Show current player status'
+    'play:Resume or replay last station'
+    'stop:Pause playback'
+    'kill:Kill the daemon and stop playback'
+    'volume:Get or set volume'
+    'find:Search for radio stations'
+    'help:Show help'
+    'completion:Print zsh completion script'
+  )
+
+  case $words[2] in
+    volume)
+      local -a vopts
+      vopts=(
+        '--up:Increase volume'
+        '--down:Decrease volume'
+      )
+      _describe 'volume options' vopts
+      ;;
+    find)
+      _arguments \
+        ':query:' \
+        '--country[Filter by country]:country' \
+        '--language[Filter by language]:language' \
+        '--tags[Filter by tags]:tags' \
+        '--codec[Filter by codec]:codec' \
+        '--limit[Set result limit]:limit' \
+        '--skip[Skip N results]:offset' \
+        '--order[Sort order (name/votes/clickcount)]:order:(name votes clickcount)' \
+        '--hidebroken[Hide broken stations]'
+      ;;
+    *)
+      _describe 'rad commands' commands
+      ;;
+  esac
+}
+
+_rad "$@"
+"#);
 }

@@ -82,7 +82,7 @@ fn draw_help_keys_content(f: &mut Frame, area: Rect) {
         ]),
         Line::from(vec![
             Span::styled("  s           ", Style::default().fg(Color::Yellow)),
-            Span::raw("Stop playback"),
+            Span::raw("Close playback"),
         ]),
         Line::from(vec![
             Span::styled("  r           ", Style::default().fg(Color::Yellow)),

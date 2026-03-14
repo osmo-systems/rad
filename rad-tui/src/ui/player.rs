@@ -82,7 +82,7 @@ fn draw_player(f: &mut Frame, app: &App, area: Rect, theme: &Theme) {
     let state_name = match info.state {
         PlayerState::Playing => "Playing",
         PlayerState::Paused => "Paused",
-        PlayerState::Stopped => "Stopped",
+        PlayerState::Stopped => "Closed",
         PlayerState::Loading => "Loading...",
         PlayerState::Error => "Error",
     };
