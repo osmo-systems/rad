@@ -148,6 +148,8 @@ async fn run_tui(data_dir: std::path::PathBuf) -> Result<()> {
         }
     }
 
+    app.add_log(tui_kit::LogLevel::Info, "TUI opened".to_string());
+
     let mut terminal = terminal;
     let mut tick_interval = interval(Duration::from_millis(100));
 
@@ -223,6 +225,8 @@ async fn run_tui(data_dir: std::path::PathBuf) -> Result<()> {
             break;
         }
     }
+
+    app.save_log();
 
     disable_raw_mode()?;
     execute!(

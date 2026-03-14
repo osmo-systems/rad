@@ -63,15 +63,23 @@ pub async fn run(args: Vec<String>, data_dir: &PathBuf) -> Result<()> {
                     }
                 }
                 Some("pause") => {
-                    daemon_conn.pause().await.map_err(|e| { eprintln!("Error: {}", e); e })?;
-                    println!("Paused");
+                    let info = daemon_conn.get_status().await
+                        .map_err(|e| { eprintln!("Error: {}", e); e })?;
+                    if info.state == rad_core::PlayerState::Paused {
+                        println!("Already paused");
+                    } else {
+                        daemon_conn.pause().await.map_err(|e| { eprintln!("Error: {}", e); e })?;
+                        let station = if info.station_name.is_empty() { "playback".to_string() } else { info.station_name.clone() };
+                        println!("Paused: {}", station);
+                    }
                 }
                 Some("start") => {
                     match daemon_conn.get_status().await {
                         Ok(info) => {
                             if info.state == rad_core::PlayerState::Paused {
                                 daemon_conn.resume().await.map_err(|e| { eprintln!("Error: {}", e); e })?;
-                                println!("Resumed");
+                                let station = if info.station_name.is_empty() { "playback".to_string() } else { info.station_name.clone() };
+                                println!("Resumed: {}", station);
                             } else if info.state == rad_core::PlayerState::Stopped {
                                 let config = Config::load(data_dir)?;
                                 if let (Some(name), Some(url)) = (config.last_station_name, config.last_station_url) {
@@ -82,7 +90,8 @@ pub async fn run(args: Vec<String>, data_dir: &PathBuf) -> Result<()> {
                                     println!("No station to play — use 'rad find' to search for stations");
                                 }
                             } else {
-                                println!("Already playing");
+                                let station = if info.station_name.is_empty() { "playback".to_string() } else { info.station_name.clone() };
+                                println!("Already playing: {}", station);
                             }
                         }
                         Err(e) => {
@@ -92,8 +101,11 @@ pub async fn run(args: Vec<String>, data_dir: &PathBuf) -> Result<()> {
                     }
                 }
                 Some("zap") => {
-                    daemon_conn.stop().await.map_err(|e| { eprintln!("Error: {}", e); e })?;
-                    println!("Stopped");
+                    let info = daemon_conn.get_status().await
+                        .map_err(|e| { eprintln!("Error: {}", e); e })?;
+                    daemon_conn.shutdown().await.map_err(|e| { eprintln!("Error: {}", e); e })?;
+                    let station = if info.station_name.is_empty() { String::new() } else { format!(": {}", info.station_name) };
+                    println!("Stopped{}", station);
                 }
                 Some("volume") => {
                     match args.get(2).map(|s| s.as_str()) {
@@ -107,7 +119,7 @@ pub async fn run(args: Vec<String>, data_dir: &PathBuf) -> Result<()> {
                             let new_vol = (info.volume + amount).min(1.0);
                             daemon_conn.set_volume(new_vol).await
                                 .map_err(|e| { eprintln!("Error: {}", e); e })?;
-                            println!("Volume: {:.0}%", new_vol * 100.0);
+                            println!("Volume: {:.0}% → {:.0}%", info.volume * 100.0, new_vol * 100.0);
                         }
                         Some("--down") => {
                             let amount = args.get(3)
@@ -119,16 +131,18 @@ pub async fn run(args: Vec<String>, data_dir: &PathBuf) -> Result<()> {
                             let new_vol = (info.volume - amount).max(0.0);
                             daemon_conn.set_volume(new_vol).await
                                 .map_err(|e| { eprintln!("Error: {}", e); e })?;
-                            println!("Volume: {:.0}%", new_vol * 100.0);
+                            println!("Volume: {:.0}% → {:.0}%", info.volume * 100.0, new_vol * 100.0);
                         }
                         Some(vol_str) => {
                             if let Ok(vol_percent) = vol_str.parse::<f32>() {
+                                let info = daemon_conn.get_status().await
+                                    .map_err(|e| { eprintln!("Error: {}", e); e })?;
                                 let vol = (vol_percent / 100.0).clamp(0.0, 1.0);
                                 daemon_conn.set_volume(vol).await
                                     .map_err(|e| { eprintln!("Error: {}", e); e })?;
-                                println!("Volume: {:.0}%", vol * 100.0);
+                                println!("Volume: {:.0}% → {:.0}%", info.volume * 100.0, vol * 100.0);
                             } else {
-                                eprintln!("Error: Invalid volume. Use 0-100, --up [amt], or --down [amt]");
+                                eprintln!("Error: Invalid volume value '{}'. Use 0-100, --up [amt], or --down [amt]", vol_str);
                                 return Err(anyhow::anyhow!("Invalid volume argument"));
                             }
                         }
@@ -140,7 +154,8 @@ pub async fn run(args: Vec<String>, data_dir: &PathBuf) -> Result<()> {
                     }
                 }
                 Some(cmd) => {
-                    eprintln!("Error: Unknown command '{}'. Use 'rad help' for available commands.", cmd);
+                    print_help();
+                    eprintln!("Error: Unknown command '{}'.", cmd);
                     return Err(anyhow::anyhow!("Unknown command: {}", cmd));
                 }
             }

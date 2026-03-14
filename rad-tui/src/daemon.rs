@@ -57,6 +57,20 @@ extern "C" {
 }
 
 pub fn run() -> Result<()> {
+    // Rename the process so it shows as "radm" in Activity Monitor / ps,
+    // distinguishable from the TUI which shows as "rad".
+    #[cfg(target_os = "macos")]
+    {
+        extern "C" {
+            fn setprogname(name: *const std::ffi::c_char);
+        }
+        unsafe { setprogname(b"radm\0".as_ptr() as *const std::ffi::c_char); }
+    }
+    #[cfg(target_os = "linux")]
+    {
+        let _ = std::fs::write("/proc/self/comm", "radm");
+    }
+
     #[cfg(target_os = "macos")]
     {
         std::thread::spawn(|| {

@@ -174,6 +174,8 @@ impl App {
             StartupTab::History => Tab::History,
         };
 
+        let initial_log = Self::load_persisted_log(&data_dir);
+
         let app = Self {
             running: true,
             current_tab: startup_tab,
@@ -227,7 +229,7 @@ impl App {
 
             animation_frame: 0,
 
-            status_log: Vec::new(),
+            status_log: initial_log,
             help_log_scroll: 0,
             log_level_filter: None,
 
@@ -296,5 +298,71 @@ impl App {
             || self.error_popup.is_some()
             || self.warning_popup.is_some()
             || self.confirm_delete.is_some()
+    }
+
+    /// Load log entries persisted from previous sessions (last 24 h only).
+    pub fn load_persisted_log(data_dir: &std::path::Path) -> Vec<LogEntry> {
+        use std::time::{SystemTime, UNIX_EPOCH};
+        let path = data_dir.join("rad-tui-log.txt");
+        let content = match std::fs::read_to_string(&path) {
+            Ok(s) => s,
+            Err(_) => return Vec::new(),
+        };
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+        content
+            .lines()
+            .filter_map(|line| {
+                let parts: Vec<&str> = line.splitn(4, '|').collect();
+                if parts.len() != 4 {
+                    return None;
+                }
+                let unix: u64 = parts[0].parse().ok()?;
+                if now.saturating_sub(unix) > 24 * 3600 {
+                    return None;
+                }
+                let level = match parts[1] {
+                    "D" => LogLevel::Debug,
+                    "I" => LogLevel::Info,
+                    "W" => LogLevel::Warning,
+                    "E" => LogLevel::Error,
+                    _ => return None,
+                };
+                Some(LogEntry {
+                    timestamp: parts[2].to_string(),
+                    level,
+                    message: parts[3].to_string(),
+                    created_at: std::time::Instant::now(),
+                })
+            })
+            .collect()
+    }
+
+    /// Persist the current in-memory log to disk for the next session.
+    pub fn save_log(&self) {
+        use std::time::{SystemTime, UNIX_EPOCH};
+        let path = self.data_dir.join("rad-tui-log.txt");
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+        let content = self
+            .status_log
+            .iter()
+            .map(|e| {
+                let level = match e.level {
+                    LogLevel::Debug => "D",
+                    LogLevel::Info => "I",
+                    LogLevel::Warning => "W",
+                    LogLevel::Error => "E",
+                };
+                let entry_unix = now.saturating_sub(e.created_at.elapsed().as_secs());
+                format!("{}|{}|{}|{}", entry_unix, level, e.timestamp, e.message)
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        let _ = std::fs::write(&path, content);
     }
 }

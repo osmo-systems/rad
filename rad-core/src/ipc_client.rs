@@ -197,10 +197,24 @@ impl PlayerDaemonClient {
     async fn start_daemon(&self) -> Result<()> {
         let current_exe = std::env::current_exe()?;
         info!("Starting daemon: {} --daemon", current_exe.display());
+
+        // Use a distinct argv[0] so the daemon shows as "radm" in Activity
+        // Monitor / ps rather than sharing the "rad" name with the TUI.
+        #[cfg(unix)]
+        {
+            use std::os::unix::process::CommandExt;
+            std::process::Command::new(&current_exe)
+                .arg0("radm")
+                .arg("--daemon")
+                .spawn()
+                .context("Failed to start player daemon")?;
+        }
+        #[cfg(not(unix))]
         tokio::process::Command::new(&current_exe)
             .arg("--daemon")
             .spawn()
             .context("Failed to start player daemon")?;
+
         info!("Daemon process spawned");
         Ok(())
     }
@@ -325,6 +339,13 @@ impl PlayerDaemonConnection {
 
     pub async fn clear_error(&mut self) -> Result<()> {
         self.send_command(ClientMessage::ClearError).await?;
+        Ok(())
+    }
+
+    pub async fn shutdown(&mut self) -> Result<()> {
+        // The daemon exits immediately after sending the Shutdown response,
+        // so the connection will be closed. Ignore any IO errors from that.
+        let _ = self.send_command(ClientMessage::Shutdown).await;
         Ok(())
     }
 
