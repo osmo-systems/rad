@@ -18,4 +18,4 @@ pub use player::{AudioPlayer, PlayerCommand, PlayerInfo, PlayerState};
 pub use search::{AutocompleteData, SearchQuery};
 pub use storage::{CacheManager, FavoritesManager, HistoryManager, SearchHistoryManager, VoteManager};
 pub use ipc::{ClientMessage, DaemonMessage, PlayerStateDto};
-pub use ipc_client::{PlayerDaemonClient, PlayerDaemonConnection};
+pub use ipc_client::{PlayerDaemonClient, PlayerDaemonConnection, DaemonSubscription};

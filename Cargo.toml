@@ -4,7 +4,6 @@ members = [
     "tui-kit",
     "rad-core",
     "rad-tui",
-    "rad-daemon",
 ]
 
 [workspace.package]

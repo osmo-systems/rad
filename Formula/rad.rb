@@ -32,11 +32,9 @@ class Rad < Formula
 
   def install
     bin.install "rad"
-    bin.install "_rad-daemon"
   end
 
   test do
     assert_match "rad - Radio Player", shell_output("#{bin}/rad --help")
-    assert_predicate bin/"_rad-daemon", :exist?
   end
 end

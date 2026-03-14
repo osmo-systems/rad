@@ -60,7 +60,7 @@ jobs:
           ARCHIVE="rad-${VERSION}-${{ matrix.target }}.tar.gz"
           tar -czf "$ARCHIVE" \
             -C target/${{ matrix.target }}/release \
-            rad _rad-daemon
+            rad
           echo "ARCHIVE=$ARCHIVE" >> $GITHUB_ENV
 
       - uses: actions/upload-artifact@v4

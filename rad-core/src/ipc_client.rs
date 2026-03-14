@@ -8,7 +8,6 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::UnixStream;
-use tokio::process::Command;
 use tokio::sync::Mutex;
 use tracing::{debug, info};
 
@@ -17,7 +16,6 @@ use crate::ipc::{ClientMessage, DaemonMessage};
 use crate::player::PlayerInfo;
 
 const DAEMON_SOCKET: &str = ".radm-player.sock";
-const DAEMON_BINARY: &str = "_rad-daemon";
 
 /// Client for communicating with the player daemon
 pub struct PlayerDaemonClient {
@@ -32,17 +30,13 @@ impl PlayerDaemonClient {
         Ok(Self { socket_path })
     }
 
-    /// Ensure daemon is running and connect to it
+    /// Connect for one-shot request/response (used by CLI)
     pub async fn connect(&self) -> Result<PlayerDaemonConnection> {
-        // Try to connect to existing daemon
         if let Ok(stream) = UnixStream::connect(&self.socket_path).await {
             info!("Connected to existing player daemon");
             let mut conn = PlayerDaemonConnection::new(stream).await?;
 
             // Health-check: verify the daemon responds within 3 seconds.
-            // An old single-threaded daemon will accept the socket connection at
-            // the OS level but never read from it while another client is active,
-            // so the health check times out and we kill + restart it.
             match tokio::time::timeout(
                 std::time::Duration::from_secs(3),
                 conn.get_status(),
@@ -61,14 +55,11 @@ impl PlayerDaemonClient {
                 }
             }
 
-            // Daemon is unresponsive — kill it and fall through to a fresh start
             self.kill_daemon();
         }
 
-        // Daemon not running (or was just killed), try to start it
         info!("Player daemon not running, attempting to start it...");
 
-        // Remove stale socket file if it exists
         if self.socket_path.exists() {
             info!("Removing stale socket file: {}", self.socket_path.display());
             if let Err(e) = std::fs::remove_file(&self.socket_path) {
@@ -78,7 +69,6 @@ impl PlayerDaemonClient {
 
         self.start_daemon().await?;
 
-        // Wait for daemon to be ready
         for attempt in 0..10 {
             tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 
@@ -97,54 +87,121 @@ impl PlayerDaemonClient {
         Err(anyhow::anyhow!("Failed to connect to daemon"))
     }
 
-    /// Kill the running daemon process and remove its socket.
+    /// Connect and subscribe to push-based state updates (used by TUI)
+    pub async fn subscribe(&self) -> Result<DaemonSubscription> {
+        let stream = self.get_or_start_stream().await?;
+        let (read_half, write_half) = tokio::io::split(stream);
+        let writer = Arc::new(Mutex::new(write_half));
+
+        // Send Subscribe message
+        {
+            let json = serde_json::to_string(&ClientMessage::Subscribe)?;
+            let mut w = writer.lock().await;
+            w.write_all(json.as_bytes()).await?;
+            w.write_all(b"\n").await?;
+            w.flush().await?;
+        }
+
+        // Background task: read StateUpdates from socket → mpsc channel
+        let (tx, rx) = tokio::sync::mpsc::channel::<PlayerInfo>(32);
+        let task = tokio::spawn(async move {
+            let mut reader = BufReader::new(read_half);
+            let mut line = String::new();
+            loop {
+                line.clear();
+                match reader.read_line(&mut line).await {
+                    Ok(0) | Err(_) => break,
+                    Ok(_) => {
+                        let info = match serde_json::from_str::<DaemonMessage>(line.trim()) {
+                            Ok(DaemonMessage::StateUpdate {
+                                state,
+                                station_name,
+                                station_url,
+                                volume,
+                                error_message,
+                            })
+                            | Ok(DaemonMessage::State {
+                                state,
+                                station_name,
+                                station_url,
+                                volume,
+                                error_message,
+                            }) => PlayerInfo {
+                                state: state.into(),
+                                station_name,
+                                station_url,
+                                volume,
+                                error_message,
+                            },
+                            _ => continue,
+                        };
+                        if tx.send(info).await.is_err() {
+                            break;
+                        }
+                    }
+                }
+            }
+        });
+
+        Ok(DaemonSubscription {
+            writer,
+            state_rx: rx,
+            _reader_task: task,
+        })
+    }
+
+    /// Ensure daemon is running and return a raw UnixStream
+    async fn get_or_start_stream(&self) -> Result<UnixStream> {
+        if let Ok(stream) = UnixStream::connect(&self.socket_path).await {
+            info!("Connected to existing player daemon");
+            return Ok(stream);
+        }
+
+        info!("Player daemon not running, starting it...");
+
+        if self.socket_path.exists() {
+            let _ = std::fs::remove_file(&self.socket_path);
+        }
+
+        self.start_daemon().await?;
+
+        for attempt in 0..10 {
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+            if let Ok(stream) = UnixStream::connect(&self.socket_path).await {
+                info!("Connected to newly started player daemon");
+                return Ok(stream);
+            }
+            if attempt == 9 {
+                return Err(anyhow::anyhow!(
+                    "Failed to connect to daemon after starting it"
+                ));
+            }
+        }
+
+        Err(anyhow::anyhow!("Failed to connect to daemon"))
+    }
+
+    /// Kill the running daemon process
     fn kill_daemon(&self) {
         info!("Killing unresponsive daemon");
-        // pkill matches on process name; -x requires an exact name match
         let _ = std::process::Command::new("pkill")
-            .arg("-x")
-            .arg(DAEMON_BINARY)
+            .args(["-f", "rad --daemon"])
             .status();
         if self.socket_path.exists() {
             let _ = std::fs::remove_file(&self.socket_path);
         }
-        // Give the OS a moment to reap the process and release the socket
         std::thread::sleep(std::time::Duration::from_millis(300));
     }
 
-    /// Start the daemon process
+    /// Start the daemon process (same binary with --daemon flag)
     async fn start_daemon(&self) -> Result<()> {
-        // Try to find the daemon binary in the same directory as the current executable
         let current_exe = std::env::current_exe()?;
-        let exe_dir = current_exe
-            .parent()
-            .ok_or_else(|| anyhow::anyhow!("Failed to determine executable directory"))?;
-
-        let daemon_path = exe_dir.join(DAEMON_BINARY);
-
-        info!("Current executable: {}", current_exe.display());
-        info!("Executable directory: {}", exe_dir.display());
-        info!("Attempting to start daemon from: {}", daemon_path.display());
-
-        // First try the full path
-        if daemon_path.exists() {
-            info!("Found daemon at: {}", daemon_path.display());
-            Command::new(&daemon_path).spawn().context(format!(
-                "Failed to start player daemon from {}",
-                daemon_path.display()
-            ))?;
-            info!("Spawned player daemon from: {}", daemon_path.display());
-            return Ok(());
-        }
-
-        info!("Daemon not found at {}, trying PATH", daemon_path.display());
-
-        // Fallback: try from PATH
-        Command::new(DAEMON_BINARY)
+        info!("Starting daemon: {} --daemon", current_exe.display());
+        tokio::process::Command::new(&current_exe)
+            .arg("--daemon")
             .spawn()
-            .context("Failed to start player daemon. Make sure 'rad-daemon' is installed and in PATH or in the same directory as this executable")?;
-
-        info!("Spawned player daemon process from PATH");
+            .context("Failed to start player daemon")?;
+        info!("Daemon process spawned");
         Ok(())
     }
 
@@ -154,14 +211,41 @@ impl PlayerDaemonClient {
     }
 }
 
-/// Active connection to the player daemon
+/// Long-lived subscription connection to the player daemon.
+///
+/// Sends commands over the write half and receives pushed `PlayerInfo`
+/// state updates from a background reader task.
+pub struct DaemonSubscription {
+    writer: Arc<Mutex<tokio::io::WriteHalf<UnixStream>>>,
+    state_rx: tokio::sync::mpsc::Receiver<PlayerInfo>,
+    _reader_task: tokio::task::JoinHandle<()>,
+}
+
+impl DaemonSubscription {
+    /// Send a fire-and-forget command to the daemon.
+    pub async fn send_command(&self, msg: ClientMessage) -> Result<()> {
+        let json = serde_json::to_string(&msg)?;
+        let mut w = self.writer.lock().await;
+        w.write_all(json.as_bytes()).await?;
+        w.write_all(b"\n").await?;
+        w.flush().await?;
+        debug!("Sent command: {:?}", msg);
+        Ok(())
+    }
+
+    /// Receive the next pushed state update (awaitable).
+    pub async fn recv(&mut self) -> Option<PlayerInfo> {
+        self.state_rx.recv().await
+    }
+}
+
+/// One-shot request/response connection (used by CLI and health checks)
 pub struct PlayerDaemonConnection {
     reader: Arc<Mutex<BufReader<tokio::io::ReadHalf<UnixStream>>>>,
     writer: Arc<Mutex<tokio::io::WriteHalf<UnixStream>>>,
 }
 
 impl PlayerDaemonConnection {
-    /// Create a new connection from a UnixStream
     async fn new(stream: UnixStream) -> Result<Self> {
         let (read_half, write_half) = tokio::io::split(stream);
         Ok(Self {
@@ -183,7 +267,6 @@ impl PlayerDaemonConnection {
     async fn send_command_inner(&mut self, msg: ClientMessage) -> Result<DaemonMessage> {
         let json = serde_json::to_string(&msg)?;
 
-        // Write command
         {
             let mut writer = self.writer.lock().await;
             writer.write_all(json.as_bytes()).await?;
@@ -193,7 +276,6 @@ impl PlayerDaemonConnection {
 
         debug!("Sent command: {:?}", msg);
 
-        // Read response
         {
             let mut reader = self.reader.lock().await;
             let mut line = String::new();
@@ -210,54 +292,45 @@ impl PlayerDaemonConnection {
         }
     }
 
-    /// Play a station
     pub async fn play(&mut self, station_name: String, url: String) -> Result<()> {
-        let msg = ClientMessage::Play { station_name, url };
-        self.send_command(msg).await?;
+        self.send_command(ClientMessage::Play { station_name, url }).await?;
         Ok(())
     }
 
-    /// Pause playback
     pub async fn pause(&mut self) -> Result<()> {
         self.send_command(ClientMessage::Pause).await?;
         Ok(())
     }
 
-    /// Resume playback
     pub async fn resume(&mut self) -> Result<()> {
         self.send_command(ClientMessage::Resume).await?;
         Ok(())
     }
 
-    /// Stop playback
     pub async fn stop(&mut self) -> Result<()> {
         self.send_command(ClientMessage::Stop).await?;
         Ok(())
     }
 
-    /// Set volume (0.0 to 1.0)
     pub async fn set_volume(&mut self, volume: f32) -> Result<()> {
         let vol = volume.max(0.0).min(1.0);
         self.send_command(ClientMessage::SetVolume(vol)).await?;
         Ok(())
     }
 
-    /// Reload current station
     pub async fn reload(&mut self) -> Result<()> {
         self.send_command(ClientMessage::Reload).await?;
         Ok(())
     }
 
-    /// Clear error state
     pub async fn clear_error(&mut self) -> Result<()> {
         self.send_command(ClientMessage::ClearError).await?;
         Ok(())
     }
 
-    /// Get current player status
     pub async fn get_status(&mut self) -> Result<PlayerInfo> {
         match self.send_command(ClientMessage::GetStatus).await? {
-            DaemonMessage::Status {
+            DaemonMessage::State {
                 state,
                 station_name,
                 station_url,

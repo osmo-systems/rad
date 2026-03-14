@@ -12,7 +12,7 @@ use rad_core::{
     StartupTab,
     search::{AutocompleteData, SearchQuery},
     storage::{AutovoteManager, CacheManager, FavoritesManager, HistoryManager, SearchHistoryManager, VoteManager},
-    PlayerState, PlayerDaemonConnection,
+    PlayerState,
 };
 use crate::ui::SearchPopup;
 use tui_kit::{LogEntry, LogLevel, Toast, ToastLevel};
@@ -144,7 +144,6 @@ impl App {
     pub async fn new(
         data_dir: PathBuf,
         mut api_client: RadioBrowserClient,
-        _daemon_conn: &mut PlayerDaemonConnection,
     ) -> Result<Self> {
         let config = Config::load(&data_dir)?;
         let favorites = FavoritesManager::new(&data_dir)?;

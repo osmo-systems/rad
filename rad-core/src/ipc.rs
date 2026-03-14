@@ -23,8 +23,10 @@ pub enum ClientMessage {
     Reload,
     /// Clear error state
     ClearError,
-    /// Get current player status
+    /// Get current player status (one-shot request/response)
     GetStatus,
+    /// Subscribe to push state updates (long-lived connection)
+    Subscribe,
     /// Graceful shutdown
     Shutdown,
 }
@@ -32,8 +34,16 @@ pub enum ClientMessage {
 /// Messages sent FROM daemon TO client
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum DaemonMessage {
-    /// Status update with current player info
-    Status {
+    /// One-shot state response (reply to GetStatus or a command)
+    State {
+        state: PlayerStateDto,
+        station_name: String,
+        station_url: String,
+        volume: f32,
+        error_message: Option<String>,
+    },
+    /// Pushed to subscribed clients on every state change
+    StateUpdate {
         state: PlayerStateDto,
         station_name: String,
         station_url: String,
@@ -95,8 +105,7 @@ impl From<ClientMessage> for Option<PlayerCommand> {
             ClientMessage::SetVolume(vol) => Some(PlayerCommand::SetVolume(vol)),
             ClientMessage::Reload => Some(PlayerCommand::Reload),
             ClientMessage::ClearError => Some(PlayerCommand::ClearError),
-            ClientMessage::GetStatus => None,
-            ClientMessage::Shutdown => None,
+            ClientMessage::GetStatus | ClientMessage::Subscribe | ClientMessage::Shutdown => None,
         }
     }
 }

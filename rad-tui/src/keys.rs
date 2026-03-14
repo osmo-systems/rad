@@ -4,12 +4,14 @@ use tui_kit::LogLevel;
 use crate::app::{App, ConfirmDelete, HelpTab, Tab};
 use rad_core::{
     config::TOAST_DURATION_OPTIONS,
+    ipc::ClientMessage,
     search::{get_suggestions, parse_query},
+    DaemonSubscription,
 };
 
 pub async fn handle_key_event(
     app: &mut App,
-    daemon_conn: &mut rad_core::PlayerDaemonConnection,
+    daemon: &mut DaemonSubscription,
     key: KeyCode,
     modifiers: KeyModifiers,
 ) {
@@ -171,7 +173,7 @@ pub async fn handle_key_event(
             KeyCode::Esc | KeyCode::Enter => {
                 tracing::info!("Closing error/warning popup");
                 app.close_error_popup();
-                let _ = daemon_conn.clear_error().await;
+                let _ = daemon.send_command(ClientMessage::ClearError).await;
                 app.player_info.error_message = None;
             }
             _ => {
@@ -336,33 +338,33 @@ pub async fn handle_key_event(
             }
         }
         KeyCode::Enter => {
-            if let Err(e) = app.play_selected(daemon_conn).await {
+            if let Err(e) = app.play_selected(daemon).await {
                 tracing::error!("Failed to play station: {}", e);
                 app.show_error(format!("Failed to play station: {}", e));
             }
         }
         KeyCode::Char(' ') => {
             if app.player_info.state == rad_core::PlayerState::Playing {
-                let _ = app.pause(daemon_conn).await;
+                let _ = app.pause(daemon).await;
             } else if app.player_info.state == rad_core::PlayerState::Paused {
-                let _ = app.resume(daemon_conn).await;
+                let _ = app.resume(daemon).await;
             } else if app.player_info.state == rad_core::PlayerState::Stopped && !app.player_info.station_url.is_empty() {
-                let _ = app.play_restored(daemon_conn).await;
+                let _ = app.play_restored(daemon).await;
             } else {
-                let _ = app.resume(daemon_conn).await;
+                let _ = app.resume(daemon).await;
             }
         }
         KeyCode::Char('s') | KeyCode::Char('S') => {
-            let _ = app.stop(daemon_conn).await;
+            let _ = app.stop(daemon).await;
         }
         KeyCode::Char('r') | KeyCode::Char('R') => {
-            let _ = app.reload(daemon_conn).await;
+            let _ = app.reload(daemon).await;
         }
         KeyCode::Char('+') | KeyCode::Char('=') => {
-            let _ = app.volume_up(daemon_conn).await;
+            let _ = app.volume_up(daemon).await;
         }
         KeyCode::Char('-') | KeyCode::Char('_') => {
-            let _ = app.volume_down(daemon_conn).await;
+            let _ = app.volume_down(daemon).await;
         }
         KeyCode::Char('f') | KeyCode::Char('F') => {
             let selected_uuid = app.get_selected_station()

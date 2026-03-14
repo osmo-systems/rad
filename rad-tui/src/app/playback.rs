@@ -1,11 +1,11 @@
 use anyhow::Result;
 use tui_kit::LogLevel;
-use rad_core::PlayerDaemonConnection;
+use rad_core::{DaemonSubscription, ipc::ClientMessage};
 
 use super::App;
 
 impl App {
-    pub async fn play_selected(&mut self, daemon_conn: &mut PlayerDaemonConnection) -> Result<()> {
+    pub async fn play_selected(&mut self, daemon: &mut DaemonSubscription) -> Result<()> {
         tracing::info!("play_selected called, stations count: {}, selected_index: {}", self.stations.len(), self.selected_index);
 
         if self.stations.is_empty() {
@@ -40,7 +40,10 @@ impl App {
 
             tracing::info!("Sending play command to daemon");
             self.add_log(LogLevel::Info, format!("Playing: {}", station.name));
-            match daemon_conn.play(station.name.clone(), station.url_resolved.clone()).await {
+            match daemon.send_command(ClientMessage::Play {
+                station_name: station.name.clone(),
+                url: station.url_resolved.clone(),
+            }).await {
                 Ok(_) => {
                     self.status_message = Some(format!("Playing: {}", station.name));
                     tracing::info!("Play command sent successfully to daemon");
@@ -67,23 +70,23 @@ impl App {
         Ok(())
     }
 
-    pub async fn pause(&mut self, daemon_conn: &mut PlayerDaemonConnection) -> Result<()> {
-        daemon_conn.pause().await?;
+    pub async fn pause(&mut self, daemon: &mut DaemonSubscription) -> Result<()> {
+        daemon.send_command(ClientMessage::Pause).await?;
         Ok(())
     }
 
-    pub async fn resume(&mut self, daemon_conn: &mut PlayerDaemonConnection) -> Result<()> {
-        daemon_conn.resume().await?;
+    pub async fn resume(&mut self, daemon: &mut DaemonSubscription) -> Result<()> {
+        daemon.send_command(ClientMessage::Resume).await?;
         Ok(())
     }
 
-    pub async fn play_restored(&mut self, daemon_conn: &mut PlayerDaemonConnection) -> Result<()> {
+    pub async fn play_restored(&mut self, daemon: &mut DaemonSubscription) -> Result<()> {
         if !self.player_info.station_url.is_empty() {
             tracing::info!("Playing restored station: {}", self.player_info.station_name);
-            daemon_conn.play(
-                self.player_info.station_name.clone(),
-                self.player_info.station_url.clone(),
-            ).await?;
+            daemon.send_command(ClientMessage::Play {
+                station_name: self.player_info.station_name.clone(),
+                url: self.player_info.station_url.clone(),
+            }).await?;
             self.add_log(LogLevel::Info, format!("Playing: {}", self.player_info.station_name));
             self.status_message = Some(format!("Playing: {}", self.player_info.station_name));
         } else {
@@ -93,20 +96,20 @@ impl App {
         Ok(())
     }
 
-    pub async fn stop(&mut self, daemon_conn: &mut PlayerDaemonConnection) -> Result<()> {
-        daemon_conn.stop().await?;
+    pub async fn stop(&mut self, daemon: &mut DaemonSubscription) -> Result<()> {
+        daemon.send_command(ClientMessage::Stop).await?;
         Ok(())
     }
 
-    pub async fn reload(&mut self, daemon_conn: &mut PlayerDaemonConnection) -> Result<()> {
-        daemon_conn.reload().await?;
+    pub async fn reload(&mut self, daemon: &mut DaemonSubscription) -> Result<()> {
+        daemon.send_command(ClientMessage::Reload).await?;
         self.status_message = Some("Reloading station...".to_string());
         Ok(())
     }
 
-    pub async fn volume_up(&mut self, daemon_conn: &mut PlayerDaemonConnection) -> Result<()> {
+    pub async fn volume_up(&mut self, daemon: &mut DaemonSubscription) -> Result<()> {
         let new_volume = (self.player_info.volume + 0.05).min(1.0);
-        daemon_conn.set_volume(new_volume).await?;
+        daemon.send_command(ClientMessage::SetVolume(new_volume)).await?;
         self.player_info.volume = new_volume;
 
         self.config.update_session_state(
@@ -119,9 +122,9 @@ impl App {
         Ok(())
     }
 
-    pub async fn volume_down(&mut self, daemon_conn: &mut PlayerDaemonConnection) -> Result<()> {
+    pub async fn volume_down(&mut self, daemon: &mut DaemonSubscription) -> Result<()> {
         let new_volume = (self.player_info.volume - 0.05).max(0.0);
-        daemon_conn.set_volume(new_volume).await?;
+        daemon.send_command(ClientMessage::SetVolume(new_volume)).await?;
         self.player_info.volume = new_volume;
 
         self.config.update_session_state(

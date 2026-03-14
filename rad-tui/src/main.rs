@@ -1,5 +1,6 @@
 mod app;
 mod cli;
+mod daemon;
 mod keys;
 mod ui;
 
@@ -22,8 +23,22 @@ use rad_core::{
     RadioBrowserClient,
 };
 
-#[tokio::main]
-async fn main() -> Result<()> {
+fn main() -> Result<()> {
+    let args: Vec<String> = std::env::args().collect();
+
+    if args.iter().any(|a| a == "--daemon") {
+        // Daemon mode: single-threaded runtime + LocalSet for non-Send AudioPlayer
+        return daemon::run();
+    }
+
+    // TUI / CLI mode: multi-threaded runtime
+    tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()?
+        .block_on(run_tui_or_cli(args))
+}
+
+async fn run_tui_or_cli(args: Vec<String>) -> Result<()> {
     let data_dir = get_data_dir()?;
 
     let log_file = tracing_appender::rolling::daily(&data_dir, "rad.log");
@@ -36,18 +51,21 @@ async fn main() -> Result<()> {
         tracing::warn!("Failed to clean up old logs: {}", e);
     }
 
-    let args: Vec<String> = std::env::args().collect();
     if args.len() > 1 {
         return cli::run(args, &data_dir).await;
     }
 
     info!("Starting Web Radio TUI");
+    run_tui(data_dir).await
+}
 
+async fn run_tui(data_dir: std::path::PathBuf) -> Result<()> {
+    // Connect to daemon (starts it if needed) and subscribe to push updates
     let daemon_client = PlayerDaemonClient::new()?;
-    let mut daemon_conn = match daemon_client.connect().await {
-        Ok(conn) => {
-            info!("Connected to player daemon");
-            conn
+    let mut subscription = match daemon_client.subscribe().await {
+        Ok(sub) => {
+            info!("Subscribed to player daemon");
+            sub
         }
         Err(e) => {
             eprintln!("Failed to connect to player daemon: {}", e);
@@ -57,8 +75,10 @@ async fn main() -> Result<()> {
 
     let api_client = match tokio::time::timeout(
         std::time::Duration::from_secs(10),
-        RadioBrowserClient::new()
-    ).await {
+        RadioBrowserClient::new(),
+    )
+    .await
+    {
         Ok(Ok(client)) => {
             info!("API client initialized");
             client
@@ -81,22 +101,30 @@ async fn main() -> Result<()> {
     let backend = CrosstermBackend::new(stdout);
     let terminal = Terminal::new(backend)?;
 
-    let mut app = App::new(data_dir, api_client, &mut daemon_conn).await?;
+    let mut app = App::new(data_dir, api_client).await?;
 
-    if let Ok(player_info) = daemon_conn.get_status().await {
-        app.player_info = player_info;
-        info!("Retrieved initial player status from daemon");
+    // Receive the initial state snapshot pushed by the daemon on subscribe
+    if let Ok(Some(info)) = tokio::time::timeout(
+        std::time::Duration::from_secs(3),
+        subscription.recv(),
+    )
+    .await
+    {
+        app.player_info = info;
+        info!("Received initial player state from daemon");
     }
 
     // Calibrate the query limit to the actual terminal height before the first search.
-    // Layout overhead: 8 (player+log) + 1 (status bar) + 2 (list borders) = 11 rows.
     if let Ok(size) = terminal.size() {
         app.current_query.limit = (size.height.saturating_sub(11) as usize).max(1);
     }
 
     if let Err(e) = app.execute_search().await {
         tracing::error!("Failed to load initial stations: {}", e);
-        app.status_message = Some(format!("Failed to load stations: {}. Check network connection.", e));
+        app.status_message = Some(format!(
+            "Failed to load stations: {}. Check network connection.",
+            e
+        ));
     }
 
     if app.current_tab != Tab::Browse {
@@ -113,12 +141,10 @@ async fn main() -> Result<()> {
         tracing::warn!("Auto-vote list failed: {}", e);
     }
 
-    if app.config.play_at_startup {
-        if !app.player_info.station_url.is_empty() {
-            info!("play_at_startup: resuming last station");
-            if let Err(e) = app.play_restored(&mut daemon_conn).await {
-                tracing::warn!("Failed to auto-play at startup: {}", e);
-            }
+    if app.config.play_at_startup && !app.player_info.station_url.is_empty() {
+        info!("play_at_startup: resuming last station");
+        if let Err(e) = app.play_restored(&mut subscription).await {
+            tracing::warn!("Failed to auto-play at startup: {}", e);
         }
     }
 
@@ -126,21 +152,12 @@ async fn main() -> Result<()> {
     let mut tick_interval = interval(Duration::from_millis(100));
 
     loop {
-        if let Ok(player_info) = daemon_conn.get_status().await {
-            app.player_info = player_info;
-        }
-
-        if let Some(ref err_msg) = app.player_info.error_message {
-            if app.error_popup.is_none() {
-                app.show_error(err_msg.clone());
-            }
-        }
-
         app.tick_toasts();
         app.animation_frame = (app.animation_frame + 1) % 48;
 
         terminal.draw(|f| ui::draw(f, &mut app))?;
 
+        // Handle deferred search / page change
         if app.pending_search {
             app.pending_search = false;
             tracing::info!("Executing pending search");
@@ -158,23 +175,36 @@ async fn main() -> Result<()> {
                     tracing::error!("Failed to load next page: {}", e);
                     app.show_error(format!("Failed to load page: {}", e));
                 }
-            } else {
-                if let Err(e) = app.prev_page().await {
-                    tracing::error!("Failed to load previous page: {}", e);
-                    app.show_error(format!("Failed to load page: {}", e));
-                }
+            } else if let Err(e) = app.prev_page().await {
+                tracing::error!("Failed to load previous page: {}", e);
+                app.show_error(format!("Failed to load page: {}", e));
             }
         }
 
+        // Wait for the next event: state push, tick, key, or Ctrl+C
         let pending_key = tokio::select! {
             _ = tick_interval.tick() => None,
+
             _ = tokio::signal::ctrl_c() => {
-                info!("Received Ctrl+C signal, shutting down...");
+                info!("Received Ctrl+C, shutting down...");
                 app.quit();
                 None
             }
+
+            info = subscription.recv() => {
+                if let Some(info) = info {
+                    if let Some(ref err) = info.error_message {
+                        if app.error_popup.is_none() {
+                            app.show_error(err.clone());
+                        }
+                    }
+                    app.player_info = info;
+                }
+                None
+            }
+
             key = async {
-                if event::poll(Duration::from_millis(50)).unwrap() {
+                if event::poll(Duration::from_millis(50)).unwrap_or(false) {
                     if let Ok(Event::Key(key)) = event::read() {
                         if key.kind == KeyEventKind::Press {
                             return Some((key.code, key.modifiers));
@@ -186,7 +216,7 @@ async fn main() -> Result<()> {
         };
 
         if let Some((code, modifiers)) = pending_key {
-            keys::handle_key_event(&mut app, &mut daemon_conn, code, modifiers).await;
+            keys::handle_key_event(&mut app, &mut subscription, code, modifiers).await;
         }
 
         if !app.running {

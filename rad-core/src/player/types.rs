@@ -7,7 +7,7 @@ pub enum PlayerState {
     Error,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct PlayerInfo {
     pub state: PlayerState,
     pub station_name: String,
