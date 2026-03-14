@@ -34,3 +34,10 @@ unicode-width = "0.2"
 
 # CLI mode (used when running with arguments)
 cliclack = "0.2"
+
+# Media controls (headphone buttons, Now Playing widget)
+souvlaki = { version = "0.8", features = ["use_dbus"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc = "0.2.7"
+cocoa = "0.24.0"
