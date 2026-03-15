@@ -4,6 +4,9 @@
 *.pdb
 Cargo.lock
 
+# Local cargo overrides
+.cargo/config.toml
+
 # IDE
 .idea/
 .vscode/

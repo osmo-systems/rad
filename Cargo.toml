@@ -1,11 +1,5 @@
-[workspace]
-resolver = "2"
-members = [
-    "tui-kit",
-    "rad",
-]
-
-[workspace.package]
+[package]
+name = "rad"
 version = "0.1.0"
 edition = "2021"
 rust-version = "1.93"
@@ -13,31 +7,61 @@ license = "MIT OR Apache-2.0"
 authors = ["Mathieu Antoine"]
 repository = "https://github.com/osmo-systems/rad"
 homepage = "https://github.com/osmo-systems/rad"
+description = "Terminal radio player powered by Radio Browser"
+keywords = ["radio", "tui", "terminal", "audio", "player"]
+categories = ["command-line-utilities", "multimedia::audio"]
 
-[workspace.dependencies]
-# Async runtime
+[lib]
+name = "rad"
+path = "src/lib.rs"
+
+[[bin]]
+name = "rad"
+path = "src/main.rs"
+
+[features]
+default = ["tui"]
+tui = [
+    "dep:ratatui",
+    "dep:crossterm",
+    "dep:souvlaki",
+    "dep:cliclack",
+]
+
+[dependencies]
+tui-kit = { git = "https://github.com/osmo-systems/tui-kit" }
 tokio = { version = "1.42", features = ["full"] }
-
-# Error handling
 anyhow = "1.0"
-
-# Serialization
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 toml = "0.8"
-
-# Logging
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 tracing-appender = "0.2"
-
-# Utilities
 chrono = { version = "0.4", features = ["serde"] }
 dirs = "5.0"
+reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "rustls-tls"] }
+ureq = { version = "2.10", default-features = false, features = ["tls"] }
+rodio = { version = "0.19", features = ["symphonia-all"] }
+trust-dns-resolver = { version = "0.23", default-features = false, features = ["tokio-runtime", "system-config"] }
+bytes = "1.5"
+rand = "0.8"
+unicode-width = "0.2"
+urlencoding = "2.1"
+futures-util = "0.3.32"
+stream-download = "0.24.0"
+ratatui = { version = "0.28", optional = true }
+crossterm = { version = "0.28", optional = true }
+cliclack = { version = "0.2", optional = true }
+souvlaki = { version = "0.8", features = ["use_dbus"], optional = true }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc = "0.2.7"
+cocoa = "0.24.0"
 
 [profile.release]
-strip = true          # Remove symbols for smaller binary
-opt-level = "z"       # Optimize for size
-lto = true            # Link Time Optimization
-codegen-units = 1     # Single codegen unit for better LTO effectiveness
-panic = "abort"       # Remove unwinder, reduces binary size
+strip = true
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
