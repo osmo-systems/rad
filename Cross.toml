@@ -2,5 +2,5 @@
 pre-build = [
     "dpkg --add-architecture arm64",
     "apt-get update",
-    "apt-get install -y libasound2-dev:arm64 pkg-config",
+    "apt-get install -y libasound2-dev:arm64 libdbus-1-dev:arm64 pkg-config",
 ]
