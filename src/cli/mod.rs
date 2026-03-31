@@ -4,7 +4,7 @@ use anyhow::Result;
 use std::path::PathBuf;
 use tracing::info;
 
-use rad::{api::RadioBrowserClient, config::Config, PlayerDaemonClient};
+use rad::{api::RadioBrowserClient, config::Config, PlayerDaemonClient, PlayerState};
 
 use search::{parse_search_args, run_interactive_search_with_select, SearchAction};
 
@@ -43,11 +43,11 @@ pub async fn run(args: Vec<String>, data_dir: &PathBuf) -> Result<()> {
                         println!(
                             "  State:   {}",
                             match info.state {
-                                rad::PlayerState::Playing => "Playing",
-                                rad::PlayerState::Paused => "Paused",
-                                rad::PlayerState::Stopped => "Stopped",
-                                rad::PlayerState::Loading => "Loading",
-                                rad::PlayerState::Error => "Error",
+                                PlayerState::Playing => "Playing",
+                                PlayerState::Paused => "Paused",
+                                PlayerState::Stopped => "Stopped",
+                                PlayerState::Loading => "Loading",
+                                PlayerState::Error => "Error",
                             }
                         );
                         println!(
@@ -74,7 +74,7 @@ pub async fn run(args: Vec<String>, data_dir: &PathBuf) -> Result<()> {
                         eprintln!("Error: {}", e);
                         e
                     })?;
-                    if info.state == rad::PlayerState::Paused {
+                    if info.state == PlayerState::Paused {
                         println!("Already paused");
                     } else {
                         daemon_conn.pause().await.map_err(|e| {
@@ -92,7 +92,7 @@ pub async fn run(args: Vec<String>, data_dir: &PathBuf) -> Result<()> {
                 Some("play") => {
                     match daemon_conn.get_status().await {
                         Ok(info) => {
-                            if info.state == rad::PlayerState::Paused {
+                            if info.state == PlayerState::Paused {
                                 daemon_conn.resume().await.map_err(|e| {
                                     eprintln!("Error: {}", e);
                                     e
@@ -103,7 +103,7 @@ pub async fn run(args: Vec<String>, data_dir: &PathBuf) -> Result<()> {
                                     info.station_name.clone()
                                 };
                                 println!("Resumed: {}", station);
-                            } else if info.state == rad::PlayerState::Stopped {
+                            } else if info.state == PlayerState::Stopped {
                                 let config = Config::load(data_dir)?;
                                 if let (Some(name), Some(url)) =
                                     (config.last_station_name, config.last_station_url)
@@ -134,7 +134,7 @@ pub async fn run(args: Vec<String>, data_dir: &PathBuf) -> Result<()> {
                 Some("toggle") => {
                     match daemon_conn.get_status().await {
                         Ok(info) => {
-                            if info.state == rad::PlayerState::Paused {
+                            if info.state == PlayerState::Paused {
                                 daemon_conn.resume().await.map_err(|e| {
                                     eprintln!("Error: {}", e);
                                     e
@@ -145,7 +145,7 @@ pub async fn run(args: Vec<String>, data_dir: &PathBuf) -> Result<()> {
                                     info.station_name.clone()
                                 };
                                 println!("Resumed: {}", station);
-                            } else if info.state == rad::PlayerState::Playing {
+                            } else if info.state == PlayerState::Playing {
                                 daemon_conn.pause().await.map_err(|e| {
                                     eprintln!("Error: {}", e);
                                     e
@@ -156,7 +156,7 @@ pub async fn run(args: Vec<String>, data_dir: &PathBuf) -> Result<()> {
                                     info.station_name.clone()
                                 };
                                 println!("Paused: {}", station);
-                            } else if info.state == rad::PlayerState::Stopped {
+                            } else if info.state == PlayerState::Stopped {
                                 let config = Config::load(data_dir)?;
                                 if let (Some(name), Some(url)) =
                                     (config.last_station_name, config.last_station_url)
@@ -178,8 +178,8 @@ pub async fn run(args: Vec<String>, data_dir: &PathBuf) -> Result<()> {
                                 println!(
                                     "Current state is {}, cannot toggle",
                                     match info.state {
-                                        rad::PlayerState::Loading => "Loading",
-                                        rad::PlayerState::Error => "Error",
+                                        PlayerState::Loading => "Loading",
+                                        PlayerState::Error => "Error",
                                         _ => "Unknown",
                                     }
                                 );
@@ -389,7 +389,7 @@ async fn run_interactive_search(data_dir: &PathBuf) -> Result<()> {
         spinner.start("Fetching results...");
 
         let results = match async {
-            let mut api_client = rad::api::RadioBrowserClient::new().await?;
+            let mut api_client = RadioBrowserClient::new().await?;
             api_client.advanced_search(&query).await
         }
         .await
@@ -436,7 +436,7 @@ async fn play_station(name: String, url: String, data_dir: &PathBuf) -> Result<(
     let spinner = cliclack::spinner();
     spinner.start(format!("Loading: {}", name));
 
-    let daemon_client = rad::PlayerDaemonClient::new()?;
+    let daemon_client = PlayerDaemonClient::new()?;
     let mut conn = daemon_client.connect().await?;
 
     conn.play(name.clone(), url.clone()).await.map_err(|e| {
@@ -450,8 +450,8 @@ async fn play_station(name: String, url: String, data_dir: &PathBuf) -> Result<(
         tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
         match conn.get_status().await {
             Ok(status) => match status.state {
-                rad::PlayerState::Playing => break,
-                rad::PlayerState::Error => {
+                PlayerState::Playing => break,
+                PlayerState::Error => {
                     spinner.error("Failed to load station");
                     if let Some(msg) = status.error_message {
                         eprintln!("Error: {}", msg);
