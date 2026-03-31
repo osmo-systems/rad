@@ -4,11 +4,7 @@ use anyhow::Result;
 use std::path::PathBuf;
 use tracing::info;
 
-use rad::{
-    config::Config,
-    api::RadioBrowserClient,
-    PlayerDaemonClient,
-};
+use rad::{api::RadioBrowserClient, config::Config, PlayerDaemonClient};
 
 use search::{parse_search_args, run_interactive_search_with_select, SearchAction};
 
@@ -41,38 +37,55 @@ pub async fn run(args: Vec<String>, data_dir: &PathBuf) -> Result<()> {
             };
 
             match args.get(1).map(|s| s.as_str()) {
-                None | Some("info") => {
-                    match daemon_conn.get_status().await {
-                        Ok(info) => {
-                            println!("\nPlayer Status:");
-                            println!("  State:   {}", match info.state {
+                None | Some("info") => match daemon_conn.get_status().await {
+                    Ok(info) => {
+                        println!("\nPlayer Status:");
+                        println!(
+                            "  State:   {}",
+                            match info.state {
                                 rad::PlayerState::Playing => "Playing",
-                                rad::PlayerState::Paused  => "Paused",
+                                rad::PlayerState::Paused => "Paused",
                                 rad::PlayerState::Stopped => "Stopped",
                                 rad::PlayerState::Loading => "Loading",
-                                rad::PlayerState::Error   => "Error",
-                            });
-                            println!("  Station: {}", if info.station_name.is_empty() { "None" } else { &info.station_name });
-                            println!("  Volume:  {:.0}%", info.volume * 100.0);
-                            if let Some(err) = &info.error_message {
-                                println!("  Error:   {}", err);
+                                rad::PlayerState::Error => "Error",
                             }
-                            println!();
+                        );
+                        println!(
+                            "  Station: {}",
+                            if info.station_name.is_empty() {
+                                "None"
+                            } else {
+                                &info.station_name
+                            }
+                        );
+                        println!("  Volume:  {:.0}%", info.volume * 100.0);
+                        if let Some(err) = &info.error_message {
+                            println!("  Error:   {}", err);
                         }
-                        Err(e) => {
-                            eprintln!("Error: {}", e);
-                            return Err(e);
-                        }
+                        println!();
                     }
-                }
-                Some("stop") => {
-                    let info = daemon_conn.get_status().await
-                        .map_err(|e| { eprintln!("Error: {}", e); e })?;
+                    Err(e) => {
+                        eprintln!("Error: {}", e);
+                        return Err(e);
+                    }
+                },
+                Some("pause") => {
+                    let info = daemon_conn.get_status().await.map_err(|e| {
+                        eprintln!("Error: {}", e);
+                        e
+                    })?;
                     if info.state == rad::PlayerState::Paused {
                         println!("Already paused");
                     } else {
-                        daemon_conn.pause().await.map_err(|e| { eprintln!("Error: {}", e); e })?;
-                        let station = if info.station_name.is_empty() { "playback".to_string() } else { info.station_name.clone() };
+                        daemon_conn.pause().await.map_err(|e| {
+                            eprintln!("Error: {}", e);
+                            e
+                        })?;
+                        let station = if info.station_name.is_empty() {
+                            "playback".to_string()
+                        } else {
+                            info.station_name.clone()
+                        };
                         println!("Paused: {}", station);
                     }
                 }
@@ -80,20 +93,35 @@ pub async fn run(args: Vec<String>, data_dir: &PathBuf) -> Result<()> {
                     match daemon_conn.get_status().await {
                         Ok(info) => {
                             if info.state == rad::PlayerState::Paused {
-                                daemon_conn.resume().await.map_err(|e| { eprintln!("Error: {}", e); e })?;
-                                let station = if info.station_name.is_empty() { "playback".to_string() } else { info.station_name.clone() };
+                                daemon_conn.resume().await.map_err(|e| {
+                                    eprintln!("Error: {}", e);
+                                    e
+                                })?;
+                                let station = if info.station_name.is_empty() {
+                                    "playback".to_string()
+                                } else {
+                                    info.station_name.clone()
+                                };
                                 println!("Resumed: {}", station);
                             } else if info.state == rad::PlayerState::Stopped {
                                 let config = Config::load(data_dir)?;
-                                if let (Some(name), Some(url)) = (config.last_station_name, config.last_station_url) {
-                                    daemon_conn.play(name.clone(), url).await
-                                        .map_err(|e| { eprintln!("Error: {}", e); e })?;
+                                if let (Some(name), Some(url)) =
+                                    (config.last_station_name, config.last_station_url)
+                                {
+                                    daemon_conn.play(name.clone(), url).await.map_err(|e| {
+                                        eprintln!("Error: {}", e);
+                                        e
+                                    })?;
                                     println!("Playing: {}", name);
                                 } else {
                                     println!("No station to play — use 'rad find' to search for stations");
                                 }
                             } else {
-                                let station = if info.station_name.is_empty() { "playback".to_string() } else { info.station_name.clone() };
+                                let station = if info.station_name.is_empty() {
+                                    "playback".to_string()
+                                } else {
+                                    info.station_name.clone()
+                                };
                                 println!("Already playing: {}", station);
                             }
                         }
@@ -103,59 +131,150 @@ pub async fn run(args: Vec<String>, data_dir: &PathBuf) -> Result<()> {
                         }
                     }
                 }
-                Some("kill") => {
-                    let info = daemon_conn.get_status().await
-                        .map_err(|e| { eprintln!("Error: {}", e); e })?;
-                    daemon_conn.shutdown().await.map_err(|e| { eprintln!("Error: {}", e); e })?;
-                    let station = if info.station_name.is_empty() { String::new() } else { format!(": {}", info.station_name) };
-                    println!("Stopped{}", station);
-                }
-                Some("volume") => {
-                    match args.get(2).map(|s| s.as_str()) {
-                        Some("--up") => {
-                            let amount = args.get(3)
-                                .and_then(|s| s.parse::<f32>().ok())
-                                .map(|v| v / 100.0)
-                                .unwrap_or(0.1);
-                            let info = daemon_conn.get_status().await
-                                .map_err(|e| { eprintln!("Error: {}", e); e })?;
-                            let new_vol = (info.volume + amount).min(1.0);
-                            daemon_conn.set_volume(new_vol).await
-                                .map_err(|e| { eprintln!("Error: {}", e); e })?;
-                            println!("Volume: {:.0}% → {:.0}%", info.volume * 100.0, new_vol * 100.0);
-                        }
-                        Some("--down") => {
-                            let amount = args.get(3)
-                                .and_then(|s| s.parse::<f32>().ok())
-                                .map(|v| v / 100.0)
-                                .unwrap_or(0.1);
-                            let info = daemon_conn.get_status().await
-                                .map_err(|e| { eprintln!("Error: {}", e); e })?;
-                            let new_vol = (info.volume - amount).max(0.0);
-                            daemon_conn.set_volume(new_vol).await
-                                .map_err(|e| { eprintln!("Error: {}", e); e })?;
-                            println!("Volume: {:.0}% → {:.0}%", info.volume * 100.0, new_vol * 100.0);
-                        }
-                        Some(vol_str) => {
-                            if let Ok(vol_percent) = vol_str.parse::<f32>() {
-                                let info = daemon_conn.get_status().await
-                                    .map_err(|e| { eprintln!("Error: {}", e); e })?;
-                                let vol = (vol_percent / 100.0).clamp(0.0, 1.0);
-                                daemon_conn.set_volume(vol).await
-                                    .map_err(|e| { eprintln!("Error: {}", e); e })?;
-                                println!("Volume: {:.0}% → {:.0}%", info.volume * 100.0, vol * 100.0);
+                Some("toggle") => {
+                    match daemon_conn.get_status().await {
+                        Ok(info) => {
+                            if info.state == rad::PlayerState::Paused {
+                                daemon_conn.resume().await.map_err(|e| {
+                                    eprintln!("Error: {}", e);
+                                    e
+                                })?;
+                                let station = if info.station_name.is_empty() {
+                                    "playback".to_string()
+                                } else {
+                                    info.station_name.clone()
+                                };
+                                println!("Resumed: {}", station);
+                            } else if info.state == rad::PlayerState::Playing {
+                                daemon_conn.pause().await.map_err(|e| {
+                                    eprintln!("Error: {}", e);
+                                    e
+                                })?;
+                                let station = if info.station_name.is_empty() {
+                                    "playback".to_string()
+                                } else {
+                                    info.station_name.clone()
+                                };
+                                println!("Paused: {}", station);
+                            } else if info.state == rad::PlayerState::Stopped {
+                                let config = Config::load(data_dir)?;
+                                if let (Some(name), Some(url)) =
+                                    (config.last_station_name, config.last_station_url)
+                                {
+                                    daemon_conn.play(name.clone(), url).await.map_err(|e| {
+                                        eprintln!("Error: {}", e);
+                                        e
+                                    })?;
+                                    println!("Playing: {}", name);
+                                } else {
+                                    println!("No station to play — use 'rad find' to search for stations");
+                                }
                             } else {
-                                eprintln!("Error: Invalid volume value '{}'. Use 0-100, --up [amt], or --down [amt]", vol_str);
-                                return Err(anyhow::anyhow!("Invalid volume argument"));
+                                let station = if info.station_name.is_empty() {
+                                    "playback".to_string()
+                                } else {
+                                    info.station_name.clone()
+                                };
+                                println!(
+                                    "Current state is {}, cannot toggle",
+                                    match info.state {
+                                        rad::PlayerState::Loading => "Loading",
+                                        rad::PlayerState::Error => "Error",
+                                        _ => "Unknown",
+                                    }
+                                );
                             }
                         }
-                        None => {
-                            let info = daemon_conn.get_status().await
-                                .map_err(|e| { eprintln!("Error: {}", e); e })?;
-                            println!("Volume: {:.0}%", info.volume * 100.0);
+                        Err(e) => {
+                            eprintln!("Error: {}", e);
+                            return Err(e);
                         }
                     }
                 }
+                Some("kill") => {
+                    let info = daemon_conn.get_status().await.map_err(|e| {
+                        eprintln!("Error: {}", e);
+                        e
+                    })?;
+                    daemon_conn.shutdown().await.map_err(|e| {
+                        eprintln!("Error: {}", e);
+                        e
+                    })?;
+                    let station = if info.station_name.is_empty() {
+                        String::new()
+                    } else {
+                        format!(": {}", info.station_name)
+                    };
+                    println!("Stopped{}", station);
+                }
+                Some("volume") => match args.get(2).map(|s| s.as_str()) {
+                    Some("--up") => {
+                        let amount = args
+                            .get(3)
+                            .and_then(|s| s.parse::<f32>().ok())
+                            .map(|v| v / 100.0)
+                            .unwrap_or(0.1);
+                        let info = daemon_conn.get_status().await.map_err(|e| {
+                            eprintln!("Error: {}", e);
+                            e
+                        })?;
+                        let new_vol = (info.volume + amount).min(1.0);
+                        daemon_conn.set_volume(new_vol).await.map_err(|e| {
+                            eprintln!("Error: {}", e);
+                            e
+                        })?;
+                        println!(
+                            "Volume: {:.0}% → {:.0}%",
+                            info.volume * 100.0,
+                            new_vol * 100.0
+                        );
+                    }
+                    Some("--down") => {
+                        let amount = args
+                            .get(3)
+                            .and_then(|s| s.parse::<f32>().ok())
+                            .map(|v| v / 100.0)
+                            .unwrap_or(0.1);
+                        let info = daemon_conn.get_status().await.map_err(|e| {
+                            eprintln!("Error: {}", e);
+                            e
+                        })?;
+                        let new_vol = (info.volume - amount).max(0.0);
+                        daemon_conn.set_volume(new_vol).await.map_err(|e| {
+                            eprintln!("Error: {}", e);
+                            e
+                        })?;
+                        println!(
+                            "Volume: {:.0}% → {:.0}%",
+                            info.volume * 100.0,
+                            new_vol * 100.0
+                        );
+                    }
+                    Some(vol_str) => {
+                        if let Ok(vol_percent) = vol_str.parse::<f32>() {
+                            let info = daemon_conn.get_status().await.map_err(|e| {
+                                eprintln!("Error: {}", e);
+                                e
+                            })?;
+                            let vol = (vol_percent / 100.0).clamp(0.0, 1.0);
+                            daemon_conn.set_volume(vol).await.map_err(|e| {
+                                eprintln!("Error: {}", e);
+                                e
+                            })?;
+                            println!("Volume: {:.0}% → {:.0}%", info.volume * 100.0, vol * 100.0);
+                        } else {
+                            eprintln!("Error: Invalid volume value '{}'. Use 0-100, --up [amt], or --down [amt]", vol_str);
+                            return Err(anyhow::anyhow!("Invalid volume argument"));
+                        }
+                    }
+                    None => {
+                        let info = daemon_conn.get_status().await.map_err(|e| {
+                            eprintln!("Error: {}", e);
+                            e
+                        })?;
+                        println!("Volume: {:.0}%", info.volume * 100.0);
+                    }
+                },
                 Some(cmd) => {
                     eprintln!("Error: Unknown command '{}'.\n", cmd);
                     print_help();
@@ -181,7 +300,9 @@ async fn run_direct_search(args: &[String], data_dir: &PathBuf) -> Result<()> {
         let results = match async {
             let mut api_client = RadioBrowserClient::new().await?;
             api_client.advanced_search(&query).await
-        }.await {
+        }
+        .await
+        {
             Ok(results) => {
                 spinner.stop("Stations loaded");
                 std::thread::sleep(std::time::Duration::from_millis(100));
@@ -226,24 +347,42 @@ async fn run_interactive_search(data_dir: &PathBuf) -> Result<()> {
     let mut query = rad::search::SearchQuery::default();
 
     let name_input: String = input("Station name").default_input("").interact()?;
-    if !name_input.is_empty() { query.name = Some(name_input); }
+    if !name_input.is_empty() {
+        query.name = Some(name_input);
+    }
 
     let language_input: String = input("Language").default_input("").interact()?;
-    if !language_input.is_empty() { query.language = Some(language_input); }
+    if !language_input.is_empty() {
+        query.language = Some(language_input);
+    }
 
     let country_input: String = input("Country").default_input("").interact()?;
-    if !country_input.is_empty() { query.country = Some(country_input); }
+    if !country_input.is_empty() {
+        query.country = Some(country_input);
+    }
 
     let tags_input: String = input("Tags").default_input("").interact()?;
-    if !tags_input.is_empty() { query.tags = Some(vec![tags_input]); }
+    if !tags_input.is_empty() {
+        query.tags = Some(vec![tags_input]);
+    }
 
     let codec_input: String = input("Codec").default_input("").interact()?;
-    if !codec_input.is_empty() { query.codec = Some(codec_input); }
+    if !codec_input.is_empty() {
+        query.codec = Some(codec_input);
+    }
 
-    let order_input: String = input("Order by (e.g., name, votes, clickcount)").default_input("").interact()?;
-    if !order_input.is_empty() { query.order = Some(order_input); }
+    let order_input: String = input("Order by (e.g., name, votes, clickcount)")
+        .default_input("")
+        .interact()?;
+    if !order_input.is_empty() {
+        query.order = Some(order_input);
+    }
 
-    query.hidebroken = Some(confirm("Hide broken stations?").initial_value(true).interact()?);
+    query.hidebroken = Some(
+        confirm("Hide broken stations?")
+            .initial_value(true)
+            .interact()?,
+    );
 
     loop {
         let spinner = cliclack::spinner();
@@ -252,7 +391,9 @@ async fn run_interactive_search(data_dir: &PathBuf) -> Result<()> {
         let results = match async {
             let mut api_client = rad::api::RadioBrowserClient::new().await?;
             api_client.advanced_search(&query).await
-        }.await {
+        }
+        .await
+        {
             Ok(results) => {
                 spinner.stop("Results loaded");
                 std::thread::sleep(std::time::Duration::from_millis(100));
@@ -276,8 +417,12 @@ async fn run_interactive_search(data_dir: &PathBuf) -> Result<()> {
                 play_station(name, url, data_dir).await?;
                 return Ok(());
             }
-            Some(SearchAction::NextPage) => { query.offset += query.limit; }
-            Some(SearchAction::PrevPage) => { query.offset = query.offset.saturating_sub(query.limit); }
+            Some(SearchAction::NextPage) => {
+                query.offset += query.limit;
+            }
+            Some(SearchAction::PrevPage) => {
+                query.offset = query.offset.saturating_sub(query.limit);
+            }
             None => {
                 outro("Search cancelled")?;
                 println!();
@@ -294,8 +439,10 @@ async fn play_station(name: String, url: String, data_dir: &PathBuf) -> Result<(
     let daemon_client = rad::PlayerDaemonClient::new()?;
     let mut conn = daemon_client.connect().await?;
 
-    conn.play(name.clone(), url.clone()).await
-        .map_err(|e| { spinner.error("Failed to play station"); e })?;
+    conn.play(name.clone(), url.clone()).await.map_err(|e| {
+        spinner.error("Failed to play station");
+        e
+    })?;
 
     // Wait for the stream to actually start
     let mut attempts = 0;
@@ -364,14 +511,16 @@ fn print_help() {
 }
 
 fn print_completion_zsh() {
-    print!("{}", r#"#compdef rad
+    print!(
+        "{}",
+        r#"#compdef rad
 
 _rad() {
   local -a commands
   commands=(
     'info:Show current player status'
     'play:Resume or replay last station'
-    'stop:Pause playback'
+    'pause:Pause playback'
     'kill:Kill the daemon and stop playback'
     'volume:Get or set volume'
     'find:Search for radio stations'
@@ -407,5 +556,6 @@ _rad() {
 }
 
 _rad "$@"
-"#);
+"#
+    );
 }
