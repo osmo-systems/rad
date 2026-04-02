@@ -8,6 +8,7 @@ use ratatui::{
 
 use tui_kit::{
     block::popup_block,
+    form::{FieldInput, FormField, FormState, render_form},
     popup::centered_popup,
     tabs::tab_line,
     Theme,
@@ -16,6 +17,7 @@ use tui_kit::{
 use ratatui::layout::Rect;
 
 use crate::app::{App, HelpTab};
+use rad::config::TOAST_DURATION_OPTIONS;
 
 pub(super) fn draw_help_popup(f: &mut Frame, app: &App, theme: &Theme) {
     let popup_area = centered_popup(f, 0.7, 90, 26);
@@ -132,45 +134,73 @@ fn draw_help_keys_content(f: &mut Frame, area: Rect) {
 }
 
 fn draw_help_settings_content(f: &mut Frame, app: &App, area: Rect, theme: &Theme) {
-    let label_width = 22usize;
+    let toast_opts: Vec<String> = TOAST_DURATION_OPTIONS
+        .iter()
+        .map(|&v| if v == 0 { "Off".into() } else { format!("{}s", v) })
+        .collect();
+    let toast_sel = TOAST_DURATION_OPTIONS
+        .iter()
+        .position(|&v| v == app.config.toast_duration_secs)
+        .unwrap_or(3);
 
-    let toast_duration_label = if app.config.toast_duration_secs == 0 {
-        "Off".to_string()
-    } else {
-        format!("{}s", app.config.toast_duration_secs)
-    };
-    let settings: &[(&str, &str)] = &[
-        ("Startup Tab", app.config.startup_tab.label()),
-        ("Default Search Order", app.config.default_search_order.label()),
-        ("Play at Startup", if app.config.play_at_startup { "On" } else { "Off" }),
-        ("Autovote", if app.config.auto_vote_favorites { "On" } else { "Off" }),
-        ("Show Logo", if app.config.show_logo { "On" } else { "Off" }),
-        ("Toast Duration", &toast_duration_label),
+    let fields = vec![
+        FormField {
+            label: "Startup Tab".into(),
+            input: FieldInput::Enum {
+                options: vec!["Search".into(), "Favorites".into(), "History".into()],
+                selected: match app.config.startup_tab {
+                    rad::config::StartupTab::Search => 0,
+                    rad::config::StartupTab::Favorites => 1,
+                    rad::config::StartupTab::History => 2,
+                },
+            },
+            required: false,
+            description: None,
+        },
+        FormField {
+            label: "Default Search Order".into(),
+            input: FieldInput::Enum {
+                options: vec!["Votes".into(), "Name".into(), "Click Count".into(), "Bitrate".into(), "Random".into()],
+                selected: match app.config.default_search_order {
+                    rad::config::DefaultSearchOrder::Votes => 0,
+                    rad::config::DefaultSearchOrder::Name => 1,
+                    rad::config::DefaultSearchOrder::ClickCount => 2,
+                    rad::config::DefaultSearchOrder::Bitrate => 3,
+                    rad::config::DefaultSearchOrder::Random => 4,
+                },
+            },
+            required: false,
+            description: None,
+        },
+        FormField {
+            label: "Play at Startup".into(),
+            input: FieldInput::Boolean(app.config.play_at_startup),
+            required: false,
+            description: None,
+        },
+        FormField {
+            label: "Autovote".into(),
+            input: FieldInput::Boolean(app.config.autovote_enabled),
+            required: false,
+            description: Some("Enables the Autovote tab and auto-votes on startup".into()),
+        },
+        FormField {
+            label: "Show Logo".into(),
+            input: FieldInput::Boolean(app.config.show_logo),
+            required: false,
+            description: None,
+        },
+        FormField {
+            label: "Toast Duration".into(),
+            input: FieldInput::Enum { options: toast_opts, selected: toast_sel },
+            required: false,
+            description: None,
+        },
     ];
 
-    let mut lines = vec![Line::from("")];
-
-    for (i, (label, value)) in settings.iter().enumerate() {
-        let is_selected = i == app.settings_selected;
-        let padding = label_width.saturating_sub(label.len());
-        let label_part = format!("  {}{}", label, " ".repeat(padding));
-        let value_part = format!("[ {} ]", value);
-
-        let row = Line::from(vec![
-            Span::styled(
-                label_part,
-                if is_selected { theme.tab_active } else { theme.body },
-            ),
-            Span::styled(
-                value_part,
-                if is_selected { theme.selection } else { theme.shortcut_key },
-            ),
-        ]);
-        lines.push(row);
-        lines.push(Line::from(""));
-    }
-
-    f.render_widget(Paragraph::new(lines).alignment(Alignment::Left), area);
+    let mut state = FormState::new(fields);
+    state.focused = app.settings_selected;
+    render_form(f, area, &state, theme);
 }
 
 fn draw_help_log_content(f: &mut Frame, app: &App, area: Rect) {

@@ -133,10 +133,6 @@ async fn run_tui(data_dir: std::path::PathBuf) -> Result<()> {
 
     tracing::info!("Initial data loaded. Stations count: {}", app.stations.len());
 
-    if let Err(e) = app.auto_vote_favorites().await {
-        tracing::warn!("Auto-vote for favorites failed: {}", e);
-    }
-
     if let Err(e) = app.auto_vote_autovote_list().await {
         tracing::warn!("Auto-vote list failed: {}", e);
     }

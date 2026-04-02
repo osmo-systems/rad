@@ -77,7 +77,7 @@ pub async fn handle_key_event(
                     }
                 }
                 KeyCode::Down | KeyCode::Char('j') => {
-                    if app.settings_selected < 5 {
+                    if app.settings_selected < 4 {
                         app.settings_selected += 1;
                     }
                 }
@@ -96,9 +96,9 @@ pub async fn handle_key_event(
                         let _ = app.config.save(&app.data_dir);
                     }
                     3 => {
-                        app.config.auto_vote_favorites = !app.config.auto_vote_favorites;
+                        app.config.autovote_enabled = !app.config.autovote_enabled;
                         let _ = app.config.save(&app.data_dir);
-                        if !app.config.auto_vote_favorites && app.current_tab == Tab::Autovote {
+                        if !app.config.autovote_enabled && app.current_tab == Tab::Autovote {
                             app.current_tab = Tab::Favorites;
                             app.reload_current_tab();
                         }
@@ -107,7 +107,7 @@ pub async fn handle_key_event(
                         app.config.show_logo = !app.config.show_logo;
                         let _ = app.config.save(&app.data_dir);
                     }
-                    5 => {
+                    _ => {
                         let cur = app.config.toast_duration_secs;
                         let next = TOAST_DURATION_OPTIONS
                             .iter()
@@ -118,7 +118,6 @@ pub async fn handle_key_event(
                         app.config.toast_duration_secs = next;
                         let _ = app.config.save(&app.data_dir);
                     }
-                    _ => {}
                 },
                 KeyCode::Left => match app.settings_selected {
                     0 => {
@@ -135,9 +134,9 @@ pub async fn handle_key_event(
                         let _ = app.config.save(&app.data_dir);
                     }
                     3 => {
-                        app.config.auto_vote_favorites = !app.config.auto_vote_favorites;
+                        app.config.autovote_enabled = !app.config.autovote_enabled;
                         let _ = app.config.save(&app.data_dir);
-                        if !app.config.auto_vote_favorites && app.current_tab == Tab::Autovote {
+                        if !app.config.autovote_enabled && app.current_tab == Tab::Autovote {
                             app.current_tab = Tab::Favorites;
                             app.reload_current_tab();
                         }
@@ -146,7 +145,7 @@ pub async fn handle_key_event(
                         app.config.show_logo = !app.config.show_logo;
                         let _ = app.config.save(&app.data_dir);
                     }
-                    5 => {
+                    _ => {
                         let cur = app.config.toast_duration_secs;
                         let prev = TOAST_DURATION_OPTIONS
                             .iter()
@@ -158,7 +157,6 @@ pub async fn handle_key_event(
                         app.config.toast_duration_secs = prev;
                         let _ = app.config.save(&app.data_dir);
                     }
-                    _ => {}
                 },
                 _ => {}
             },
@@ -371,7 +369,7 @@ pub async fn handle_key_event(
                 .map(|s| s.station_uuid.clone());
             if let Err(e) = app.toggle_favorite().await {
                 tracing::error!("Failed to toggle favorite: {}", e);
-            } else if app.config.auto_vote_favorites {
+            } else if app.config.autovote_enabled {
                 if let Some(uuid) = selected_uuid {
                     if app.favorites.is_favorite(&uuid)
                         && !app.vote_manager.has_voted_recently(&uuid)
@@ -414,7 +412,7 @@ pub async fn handle_key_event(
             }
         }
         KeyCode::Char('4') => {
-            if app.config.auto_vote_favorites && app.current_tab != Tab::Autovote {
+            if app.config.autovote_enabled && app.current_tab != Tab::Autovote {
                 if matches!(app.current_tab, Tab::Browse) { app.browse_stations = app.stations.clone(); }
                 app.current_tab = Tab::Autovote;
                 app.autovote_selected = 0;

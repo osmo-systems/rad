@@ -9,7 +9,7 @@ impl App {
         if matches!(self.current_tab, Tab::Browse) {
             self.browse_stations = self.stations.clone();
         }
-        let has_autovote = self.config.auto_vote_favorites;
+        let has_autovote = self.config.autovote_enabled;
         self.current_tab = match self.current_tab {
             Tab::Browse => Tab::Favorites,
             Tab::Favorites => Tab::History,
@@ -25,7 +25,7 @@ impl App {
         if matches!(self.current_tab, Tab::Browse) {
             self.browse_stations = self.stations.clone();
         }
-        let has_autovote = self.config.auto_vote_favorites;
+        let has_autovote = self.config.autovote_enabled;
         self.current_tab = match self.current_tab {
             Tab::Browse => if has_autovote { Tab::Autovote } else { Tab::History },
             Tab::Favorites => Tab::Browse,

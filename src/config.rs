@@ -118,7 +118,7 @@ pub struct Config {
     #[serde(default)]
     pub play_at_startup: bool,
     #[serde(default)]
-    pub auto_vote_favorites: bool,
+    pub autovote_enabled: bool,
     #[serde(default = "default_true")]
     pub show_logo: bool,
     #[serde(default = "default_toast_duration")]
@@ -153,7 +153,7 @@ impl Default for Config {
             startup_tab: StartupTab::default(),
             default_search_order: DefaultSearchOrder::default(),
             play_at_startup: false,
-            auto_vote_favorites: false,
+            autovote_enabled: false,
             show_logo: true,
             toast_duration_secs: 3,
             last_volume: None,
@@ -310,7 +310,7 @@ mod tests {
         let config = Config::default();
         assert_eq!(config.default_volume, 0.5);
         assert!(!config.play_at_startup);
-        assert!(!config.auto_vote_favorites);
+        assert!(!config.autovote_enabled);
         assert!(config.show_logo);
         assert_eq!(config.toast_duration_secs, 3);
         assert_eq!(config.max_history_entries, 50);

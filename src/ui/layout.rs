@@ -78,7 +78,7 @@ pub fn draw(f: &mut Frame, app: &mut App) {
 }
 
 fn draw_main_content(f: &mut Frame, app: &mut App, area: ratatui::layout::Rect, theme: &Theme) {
-    let has_autovote = app.config.auto_vote_favorites;
+    let has_autovote = app.config.autovote_enabled;
     let mut tabs: Vec<(&str, bool)> = vec![
         ("Browse", matches!(app.current_tab, Tab::Browse)),
         ("Favorites", matches!(app.current_tab, Tab::Favorites)),

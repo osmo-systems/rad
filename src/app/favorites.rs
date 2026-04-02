@@ -63,37 +63,6 @@ impl App {
         Ok(())
     }
 
-    /// Vote for all favorite stations that haven't been voted for in the last 24h.
-    pub async fn auto_vote_favorites(&mut self) -> Result<()> {
-        if !self.config.auto_vote_favorites {
-            return Ok(());
-        }
-
-        let _ = self.vote_manager.cleanup_expired();
-
-        let uuids: Vec<(String, String)> = self
-            .favorites
-            .get_all()
-            .iter()
-            .map(|f| (f.uuid.clone(), f.name.clone()))
-            .collect();
-
-        for (uuid, name) in uuids {
-            if !self.vote_manager.has_voted_recently(&uuid) {
-                match self.api_client.vote_for_station(&uuid).await {
-                    Ok(_) => {
-                        let _ = self.vote_manager.record_vote(&uuid);
-                        self.add_log(LogLevel::Info, format!("Auto-voted for favorite: {}", name));
-                    }
-                    Err(e) => {
-                        tracing::warn!("Auto-vote failed for {}: {}", name, e);
-                    }
-                }
-            }
-        }
-        Ok(())
-    }
-
     pub fn toggle_autovote(&mut self) {
         let station = if self.current_tab == Tab::Autovote {
             self.autovote.get_all().get(self.autovote_selected).map(|s| Station {
@@ -157,6 +126,9 @@ impl App {
 
     /// Vote for all stations in the autovote list that haven't been voted for in the last 24h.
     pub async fn auto_vote_autovote_list(&mut self) -> Result<()> {
+        if !self.config.autovote_enabled {
+            return Ok(());
+        }
         let _ = self.vote_manager.cleanup_expired();
 
         let entries: Vec<(String, String)> = self.autovote.get_all()
