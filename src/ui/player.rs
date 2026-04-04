@@ -88,7 +88,7 @@ fn draw_player(f: &mut Frame, app: &App, area: Rect, theme: &Theme) {
     };
 
     let state_color = match info.state {
-        PlayerState::Playing => Color::Green,
+        PlayerState::Playing => Color::Yellow,
         PlayerState::Paused => Color::Yellow,
         PlayerState::Stopped => Color::Gray,
         PlayerState::Loading => Color::Cyan,
@@ -207,7 +207,7 @@ pub(super) fn draw_radio_art(f: &mut Frame, app: &App, area: Rect, theme: &Theme
                 2 | 4          => Color::Gray,
                 _              => Color::DarkGray,
             };
-            let wave_color = Style::default().fg(Color::Cyan);
+            let wave_color = Style::default().fg(Color::Yellow);
             const SCAN_BARS: &[&str] = &[
                 "▸ ·  ·  ·  ·  ·  ·",
                 "·  ▸ ·  ·  ·  ·  ·",
@@ -218,7 +218,7 @@ pub(super) fn draw_radio_art(f: &mut Frame, app: &App, area: Rect, theme: &Theme
                 "·  ·  ·  ·  ·  ·  ▸",
                 "·  ·  ·  ·  ·  ·  ·",
             ];
-            let logo_style = Style::default().fg(Color::Cyan);
+            let logo_style = Style::default().fg(Color::Yellow);
             vec![
                 Line::from(vec![
                     Span::styled(ant_left, wave_color),
@@ -235,7 +235,7 @@ pub(super) fn draw_radio_art(f: &mut Frame, app: &App, area: Rect, theme: &Theme
                 Line::from(Span::styled("██║  ██║██║  ██║██████╔╝", logo_style)),
                 Line::from(Span::styled("╚═╝  ╚═╝╚═╝  ╚═╝╚═════╝ ", logo_style)),
                 Line::from(""),
-                Line::from(Span::styled(SCAN_BARS[scan], Style::default().fg(Color::Cyan))),
+                Line::from(Span::styled(SCAN_BARS[scan], Style::default().fg(Color::Yellow))),
             ]
         }
         PlayerState::Paused => {
